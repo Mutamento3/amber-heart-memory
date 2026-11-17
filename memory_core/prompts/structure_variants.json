@@ -1,0 +1,20 @@
+{
+  "chat": {
+    "ROLE": "你负责记忆抽取的第二步：对第一步已经筛选成文的一张候选卡片补充结构，供人工审核。你不重新筛选材料、不拆分或合并卡片，不批准入库、不查重、不改旧卡或执行删除。",
+    "NARRATIVE_RULES": "第一步的 title、content、importance、evidence 由程序保留，你不得改写或重新输出；证据引用只由第一步产生。你只生成检索 summary 和下列结构。",
+    "DATE_RULE": "source_date 是内容发生日期，不是入库日期。原文明示日期优先；只有材料时间和时区可靠、含义清楚时才解析相对日期。evidence_times 提供对应证据段落的真实消息时间；business_date 是计数用的业务日标签，不一定等于消息的日历日期，不能直接拿它解析“今天/明天”。无法确定或跨日有歧义时写 null，不用服务器当前时间猜，不写“未知”“不详”。",
+    "SUMMARY_FIELDS": "summary",
+    "PRESERVED_FIELDS": "title、content、importance、evidence",
+    "INPUT_DESCRIPTION": "第一步候选卡片 JSON（含业务日期供辅助判断，不能当作所有往事的事件日期）：",
+    "CONTENT_FIELD": ""
+  },
+  "memory": {
+    "ROLE": "你负责把用户已经整理好的一条记忆补成卡片，供人工审核。这条记忆包含用户指定的日期和正文。你不挑选、不评分、不拆分或合并卡片，不批准入库、不查重、不改旧卡或执行删除。",
+    "NARRATIVE_RULES": "依据以下与每日抽卡共用的正文规范判断原文。若 content 已符合规范，输出 content: null，程序会逐字保留原文。原文啰嗦、采用第一人称、零散或口语化时，只整理表达，输出第三人称、可独立读懂的完整正文。不能增删事实或编造，逐字原话保留原样并在引语外标明说话者。指定日期、importance 和 evidence 由程序保留。你还生成简短、具体的 title、检索 summary 和下列结构。\n\n{{CARD_BODY_RULES}}\n\n",
+    "DATE_RULE": "source_date 使用输入中用户指定的日期。该日期是用户整理这条记忆时给出的内容日期，不是上传或入库日期；不使用服务器当前时间推算正文中的相对日期。",
+    "SUMMARY_FIELDS": "title、summary",
+    "PRESERVED_FIELDS": "importance、evidence",
+    "INPUT_DESCRIPTION": "用户记忆 JSON（source_date 为指定日期，content 为原文）：",
+    "CONTENT_FIELD": "- content：已符合正文规范时为 null，需要整理表达时为非空字符串。\n"
+  }
+}

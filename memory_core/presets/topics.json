@@ -1,0 +1,103 @@
+{
+  "lover": [
+    {
+      "name": "感情历程",
+      "description": "用户和 AI 这段感情的转折点：确认关系、纪念日、重大争吵与和好、相处方式的明显变化。普通的聊天、撒娇、陪伴不挂这个主题。",
+      "key": "relationship"
+    },
+    {
+      "name": "亲密互动",
+      "description": "用户和 AI 之间的亲吻、拥抱、调情、性等亲密互动，以及对亲密方式的偏好和感受。",
+      "key": "intimacy"
+    },
+    {
+      "name": "约定与边界",
+      "description": "双方明确的约定、承诺、相处规则与需要尊重的界限。",
+      "key": "agreements"
+    },
+    {
+      "name": "情绪与心事",
+      "description": "开心、难过、压力、担忧等情绪，想倾诉的心事，以及至今仍有影响的过往伤痛。",
+      "key": "emotions"
+    },
+    {
+      "name": "自我认知",
+      "description": "对自己的性格、价值观、身份、需求和成长的认识。",
+      "key": "self"
+    },
+    {
+      "name": "健康与身体",
+      "description": "身体状况、就医用药、作息饮食，以及需要留意的健康变化。",
+      "key": "health"
+    },
+    {
+      "name": "家人朋友",
+      "description": "与家人、朋友、现实中的伴侣等其他人的关系、相处与重要经历，包括和他们之间的感情与亲密。",
+      "key": "others"
+    },
+    {
+      "name": "工作与学习",
+      "description": "工作、学业、项目、技能学习及相关计划和进展。",
+      "key": "work"
+    },
+    {
+      "name": "兴趣爱好",
+      "description": "喜欢的作品、活动、事物与爱好，以及相关体验和偏好。",
+      "key": "interests"
+    },
+    {
+      "name": "故事与想象",
+      "description": "一起编的故事、角色扮演、想象中的场景和设定。",
+      "key": "stories"
+    },
+    {
+      "name": "日常",
+      "description": "值得留下、但不适合其他主题的生活片段。",
+      "is_fallback": true,
+      "key": "daily"
+    }
+  ],
+  "general": [
+    {
+      "name": "日常",
+      "description": "值得留下、但暂时不适合其他主题的生活片段。",
+      "is_fallback": true,
+      "key": "daily"
+    },
+    {
+      "name": "健康",
+      "description": "身体与心理健康、就医用药、作息饮食及相关变化。",
+      "key": "health"
+    },
+    {
+      "name": "工作学习",
+      "description": "工作、学业、项目、技能学习及相关计划和进展。",
+      "key": "work"
+    },
+    {
+      "name": "家人朋友",
+      "description": "与家人、朋友等人的关系、相处与重要经历。",
+      "key": "others"
+    },
+    {
+      "name": "兴趣",
+      "description": "喜欢的作品、活动、事物与爱好，以及相关体验和偏好。",
+      "key": "interests"
+    },
+    {
+      "name": "情绪",
+      "description": "情绪变化、压力、担忧、想倾诉的心事，以及至今仍有影响的过往伤痛。",
+      "key": "emotions"
+    },
+    {
+      "name": "约定和边界",
+      "description": "明确的约定、承诺、合作规则与需要尊重的界限。",
+      "key": "agreements"
+    },
+    {
+      "name": "自我认知",
+      "description": "对自己的性格、价值观、身份、需求和成长的认识。",
+      "key": "self"
+    }
+  ]
+}

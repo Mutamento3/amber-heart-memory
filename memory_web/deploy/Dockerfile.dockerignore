@@ -1,0 +1,10 @@
+**
+!memory_core/
+!memory_core/**
+!memory_web/
+!memory_web/**
+**/.env
+**/.env.*
+**/.state
+**/__pycache__
+**/*.pyc

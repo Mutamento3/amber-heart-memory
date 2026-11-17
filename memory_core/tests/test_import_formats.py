@@ -6,10 +6,10 @@ import json
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from memory_core.config import Settings
-from memory_core.extraction_contract import check_credentials, material_input
-from memory_core.import_formats import ImportFormatError, parse_upload
-from memory_core.import_preview import preview
+from memory_core.storage.config import Settings
+from memory_core.cards.extraction_contract import check_credentials, material_input
+from memory_core.imports.import_formats import ImportFormatError, parse_upload
+from memory_core.imports.import_preview import preview
 
 
 SETTINGS = Settings(3)

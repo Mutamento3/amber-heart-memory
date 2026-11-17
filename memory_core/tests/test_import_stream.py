@@ -8,9 +8,9 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
-from memory_core.config import Settings
-from memory_core.import_formats import ImportFormatError, parse_upload
-from memory_core.import_stream import iter_upload
+from memory_core.storage.config import Settings
+from memory_core.imports.import_formats import ImportFormatError, parse_upload
+from memory_core.imports.import_stream import iter_upload
 from memory_core.tests.test_import_formats import claude, uploaded, packed, gemini
 
 

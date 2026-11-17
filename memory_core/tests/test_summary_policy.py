@@ -1,7 +1,7 @@
 from dataclasses import replace
 import unittest
 
-from memory_core.summary_policy import SummarySettings, protected_tail, summary_batch
+from memory_core.daily.summary_policy import SummarySettings, protected_tail, summary_batch
 
 
 class SummaryPolicyTests(unittest.TestCase):

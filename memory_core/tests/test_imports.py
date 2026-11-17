@@ -5,13 +5,13 @@ import json
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.import_formats import parse_upload
-from memory_core.imports import ImportStore, import_run_lock
-from memory_core.install import install
-from memory_core.review import ReviewStore
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.imports.import_formats import parse_upload
+from memory_core.imports.imports import ImportStore, import_run_lock
+from memory_core.storage.install import install
+from memory_core.cards.review import ReviewStore
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_import_formats import claude, uploaded
 

@@ -8,18 +8,18 @@ import unittest
 import httpx
 from cryptography.fernet import Fernet
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.postgres import PostgresStore
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.postgres import PostgresStore
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_receipt_judge import DAY, seed_round
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.install import install_web
-from memory_web.password import write_password
-from memory_web.receipt_judge_model import ReceiptJudgeModel
+from memory_web.admin.password import write_password
+from memory_web.models.receipt_judge_model import ReceiptJudgeModel
 
 ORIGIN = 'https://memory.example.test'
 RUN = datetime.fromisoformat('2026-11-06T04:00:00+08:00')

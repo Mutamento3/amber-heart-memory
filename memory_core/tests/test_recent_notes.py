@@ -7,16 +7,16 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.bookmarks import BookmarkStore
-from memory_core.config import Settings
-from memory_core.daily_tasks import DailyTasks, TaskLost
-from memory_core.db import connect
-from memory_core.install import install, MIGRATIONS
-from memory_core.postgres import PostgresStore
-from memory_core.recent_notes import RecentNotesStore
-from memory_core.recent_note_text import SECTIONS, char_count, render_recent_notes
-from memory_core.recent_note_tidy import TidyPolicy, build_entries, prepare_request, parse_result, validate_result
-from memory_core.space import Participant, SpaceConfiguration, RevisionConflict
+from memory_core.bookmarks.bookmarks import BookmarkStore
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_tasks import DailyTasks, TaskLost
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, MIGRATIONS
+from memory_core.storage.postgres import PostgresStore
+from memory_core.bookmarks.recent_notes import RecentNotesStore
+from memory_core.bookmarks.recent_note_text import SECTIONS, char_count, render_recent_notes
+from memory_core.bookmarks.recent_note_tidy import TidyPolicy, build_entries, prepare_request, parse_result, validate_result
+from memory_core.storage.space import Participant, SpaceConfiguration, RevisionConflict
 from memory_core.tests.support import DatabaseTestCase
 
 NOW = datetime.fromisoformat('2026-11-09T03:20:00+08:00')
@@ -90,7 +90,7 @@ class RecentNotesTests(DatabaseTestCase):
 
     def test_pending_crud_short_id_ambiguity_isolation_and_actual_deletes(self):
         identifiers = ['12345678-0000-4000-8000-000000000001','12345678-0000-4000-8000-000000000002']
-        with patch('memory_core.bookmarks.uuid4',side_effect=identifiers):
+        with patch('memory_core.bookmarks.bookmarks.uuid4',side_effect=identifiers):
             first = self.add('日期\r\n第一行\n第二行')
             self.add('另一件事')
         self.assertNotIn('\n',first['content'])
@@ -179,7 +179,7 @@ class RecentNotesUpgradeTests(DatabaseTestCase):
                 (Path(directory)/path.name).write_text(path.read_text())
             target = Path(directory)/'020_recent_notes.sql'
             target.write_text(target.read_text()+'\nSELECT 1/0;')
-            with patch('memory_core.install.MIGRATIONS',Path(directory)),self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch('memory_core.storage.install.MIGRATIONS',Path(directory)),self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner,Settings(3))
         with connect(self.app) as c:
             self.assertIsNone(c.execute("SELECT to_regclass('memory_core.recent_notes') AS name").fetchone()['name'])

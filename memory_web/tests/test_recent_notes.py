@@ -16,24 +16,24 @@ import httpx
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from memory_core.bookmarks import BookmarkStore
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.recent_notes import RecentNotesStore
-from memory_core.recent_note_text import SECTIONS
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.bookmarks.bookmarks import BookmarkStore
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.bookmarks.recent_notes import RecentNotesStore
+from memory_core.bookmarks.recent_note_text import SECTIONS
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
-from memory_web.access_keys import AccessKeys
+from memory_web.admin.access_keys import AccessKeys
 from memory_web.app import create_app
-from memory_web.bookmark_tool import DESCRIPTION, BookmarkArguments
+from memory_web.mcp.bookmark_tool import DESCRIPTION, BookmarkArguments
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
+from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
-from memory_web.recent_note_model import RecentNoteTidyModel
+from memory_web.admin.password import write_password
+from memory_web.models.recent_note_model import RecentNoteTidyModel
 from memory_web.testing.diary_model import SyntheticDiaryModel
 from memory_web.testing.fake_upstream import FakeUpstream
 from memory_web.testing.recall_models import SyntheticRecallModels

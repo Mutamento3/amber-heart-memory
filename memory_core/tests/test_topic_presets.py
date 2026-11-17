@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import context_for
-from memory_core.graph_store import GraphStore
-from memory_core.install import MIGRATIONS, catalog_fingerprint, install
-from memory_core.schema import LATEST_VERSION
-from memory_core.space import Participant, SpaceConfiguration, read_topics, topic_presets
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import context_for
+from memory_core.cards.graph_store import GraphStore
+from memory_core.storage.install import MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.schema import LATEST_VERSION
+from memory_core.storage.space import Participant, SpaceConfiguration, read_topics, topic_presets
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -45,7 +45,7 @@ class TopicPresetTests(DatabaseTestCase):
             self.assertNotIn("description", columns)
         updated = deepcopy(topic_presets())
         updated["lover"][0]["description"] = "用户和 AI 的模板新说明。普通的聊天、撒娇、陪伴不挂这个主题。"
-        with patch("memory_core.space.topic_presets", return_value=updated):
+        with patch("memory_core.storage.space.topic_presets", return_value=updated):
             with connect(self.app) as connection:
                 current = context_for(connection, "lover")
                 self.assertEqual(current["topics"][0]["description"], "小禾和林舟的模板新说明。普通的聊天、撒娇、陪伴不挂这个主题。")
@@ -95,7 +95,7 @@ class TopicPresetTests(DatabaseTestCase):
             shutil.copytree(MIGRATIONS, migrations)
             file = migrations / "009_fixed_topic_presets.sql"
             file.write_text(file.read_text() + "\nSELECT 1/0;\n")
-            with patch("memory_core.install.MIGRATIONS", migrations), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch("memory_core.storage.install.MIGRATIONS", migrations), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, Settings(3))
         with connect(self.owner) as connection:
             self.assertEqual(catalog_fingerprint(connection), before)

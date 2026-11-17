@@ -7,11 +7,11 @@ from unittest.mock import patch
 import psycopg
 from psycopg.types.json import Jsonb
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore, DuplicateRequest
-from memory_core.db import connect
-from memory_core.install import install, catalog_fingerprint, MIGRATIONS
-from memory_core.space import SpaceConfiguration, Participant
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore, DuplicateRequest
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, catalog_fingerprint, MIGRATIONS
+from memory_core.storage.space import SpaceConfiguration, Participant
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -39,7 +39,7 @@ class ConversationTests(DatabaseTestCase):
             for source in MIGRATIONS.glob('*.sql'):
                 if source.name != migration.name:
                     (Path(directory) / source.name).write_bytes(source.read_bytes())
-            with patch('memory_core.install.MIGRATIONS', Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch('memory_core.storage.install.MIGRATIONS', Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, settings)
         with connect(self.owner) as c:
             self.assertEqual(c.execute('SELECT version FROM memory_core.installation').fetchone()['version'], 9)

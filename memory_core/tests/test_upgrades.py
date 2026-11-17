@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import InstallationMismatch, MIGRATION, MIGRATIONS, catalog_fingerprint, install
-from memory_core.postgres import KeywordToken, PostgresStore
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import InstallationMismatch, MIGRATION, MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.postgres import KeywordToken, PostgresStore
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -50,7 +50,7 @@ class UpgradeTests(DatabaseTestCase):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "002_migration_registry.sql"
             file.write_text((MIGRATIONS / file.name).read_text() + "\nSELECT 1/0;")
-            with patch("memory_core.install.MIGRATIONS", Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch("memory_core.storage.install.MIGRATIONS", Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, Settings(768), target_version=2)
         with connect(self.owner) as connection:
             self.assertEqual(connection.execute("SELECT version FROM memory_core.installation").fetchone()["version"], 1)
@@ -63,7 +63,7 @@ class UpgradeTests(DatabaseTestCase):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "002_migration_registry.sql"
             file.write_text((MIGRATIONS / file.name).read_text() + "\n-- edited\n")
-            with patch("memory_core.install.MIGRATIONS", Path(directory)), self.assertRaises(InstallationMismatch):
+            with patch("memory_core.storage.install.MIGRATIONS", Path(directory)), self.assertRaises(InstallationMismatch):
                 install(self.owner, Settings(), target_version=2)
         with connect(self.owner) as connection:
             connection.execute("DELETE FROM memory_core.schema_migrations WHERE version=1")

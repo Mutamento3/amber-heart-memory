@@ -5,9 +5,9 @@ import unittest
 
 import httpx
 
-from memory_core.completion_model import CompletionModelError
+from memory_core.models.completion_model import CompletionModelError
 from memory_web.config import WebSettings
-from memory_web.extraction_model import ExtractionModel, safe_usage
+from memory_web.models.extraction_model import ExtractionModel, safe_usage
 
 
 class ExtractionModelTests(unittest.TestCase):

@@ -1,10 +1,10 @@
 """Synthetic acceptance materials, explicitly registered fixed responses only."""
 
 import json
-from memory_core.db import connect
-from memory_core.drafts import context_for, structure_input
-from memory_core.extraction_contract import render_prompt
-from memory_core.review import ReviewStore, entity_embedding_text
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import context_for, structure_input
+from memory_core.cards.extraction_contract import render_prompt
+from memory_core.cards.review import ReviewStore, entity_embedding_text
 from memory_core.testing.fixed_models import FixedModels
 
 

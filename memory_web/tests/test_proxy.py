@@ -17,17 +17,17 @@ import psycopg
 from psycopg import sql
 import uvicorn
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.space import SpaceConfiguration, Participant
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.space import SpaceConfiguration, Participant
 from memory_core.tests.support import DatabaseTestCase
-from memory_web.access_keys import AccessKeys, InvalidAccessKey, KeyConfigurationError
+from memory_web.admin.access_keys import AccessKeys, InvalidAccessKey, KeyConfigurationError
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.install import install_web, fingerprint, MIGRATION
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.fake_upstream import FakeUpstream
 
 
@@ -85,7 +85,7 @@ class ProxyTests(DatabaseTestCase):
 
     def test_keys_lookup_decrypt_once_constant_compare_rotation_and_scopes(self):
         second = self.keys.rotate('two')['key']
-        with patch.object(self.keys.cipher, 'decrypt', wraps=self.keys.cipher.decrypt) as decrypt, patch('memory_web.access_keys.hmac.compare_digest', wraps=hmac.compare_digest) as compare:
+        with patch.object(self.keys.cipher, 'decrypt', wraps=self.keys.cipher.decrypt) as decrypt, patch('memory_web.admin.access_keys.hmac.compare_digest', wraps=hmac.compare_digest) as compare:
             self.assertEqual(self.keys.authenticate(self.token), 'one')
             self.assertEqual(decrypt.call_count, 1)
             self.assertEqual(compare.call_count, 1)
@@ -163,7 +163,7 @@ class ProxyTests(DatabaseTestCase):
         self.assertEqual(request['state'], 'complete')
 
     def test_auxiliary_request_never_touches_conversation_storage(self):
-        with patch('memory_web.proxy.ConversationStore', side_effect=AssertionError('must not archive')):
+        with patch('memory_web.proxy.proxy.ConversationStore', side_effect=AssertionError('must not archive')):
             response = self.chat(self.body(memory={'operation': 'non_chat'}, stream=True))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('memory', self.fake.requests[-1]['body'])

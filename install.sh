@@ -230,11 +230,11 @@ set_admin_password() {
   say "设置管理网页的登录密码（15–256 个字符，输入时不显示）"
   if [ -n "${AMBER_ADMIN_PASSWORD:-}" ]; then
     printf '%s\n%s\n' "$AMBER_ADMIN_PASSWORD" "$AMBER_ADMIN_PASSWORD" \
-      | compose run --rm --no-deps -T app python -m memory_web.password --file "$PASSWORD_FILE"
+      | compose run --rm --no-deps -T app python -m memory_web.admin.password --file "$PASSWORD_FILE"
   elif interactive; then
     local i
     for i in 1 2 3; do
-      compose run --rm --no-deps app python -m memory_web.password --file "$PASSWORD_FILE" && return 0
+      compose run --rm --no-deps app python -m memory_web.admin.password --file "$PASSWORD_FILE" && return 0
     done
     die "管理密码没有设置成功；重新运行 ./install.sh 即可从这一步继续"
   else

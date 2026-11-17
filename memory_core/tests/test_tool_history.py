@@ -3,9 +3,9 @@
 import json
 import unittest
 
-from memory_core.config import Settings
-from memory_core.conversation_history import render_turn
-from memory_core.tool_history import render_tool_card
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversation_history import render_turn
+from memory_core.recall.tool_history import render_tool_card
 
 
 def events(name, args, body, identifier='call'):

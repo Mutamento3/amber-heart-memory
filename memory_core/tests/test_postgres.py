@@ -16,10 +16,10 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import InstallationMismatch, catalog_fingerprint, install
-from memory_core.postgres import KeywordToken, PostgresStore
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import InstallationMismatch, catalog_fingerprint, install
+from memory_core.storage.postgres import KeywordToken, PostgresStore
 
 
 class StorageTests(unittest.TestCase):
@@ -207,20 +207,20 @@ class StorageTests(unittest.TestCase):
         self.assertFalse(install(self.owner1536, Settings()))
 
     def test_migration_edit_is_rejected(self):
-        from memory_core.install import MIGRATION
+        from memory_core.storage.install import MIGRATION
         with tempfile.TemporaryDirectory() as directory:
             migration = Path(directory) / "001.sql"
             migration.write_text(MIGRATION.read_text() + "\n-- changed migration\n")
-            with patch("memory_core.install.MIGRATION", migration), self.assertRaises(InstallationMismatch):
+            with patch("memory_core.storage.install.MIGRATION", migration), self.assertRaises(InstallationMismatch):
                 install(self.owner1536, Settings())
 
     def test_empty_install_failure_rolls_back_everything(self):
-        from memory_core.install import MIGRATION
+        from memory_core.storage.install import MIGRATION
         dsn = make_conninfo(self.owner, dbname="memory_test_scratch")
         with tempfile.TemporaryDirectory() as directory:
             migration = Path(directory) / "001.sql"
             migration.write_text(MIGRATION.read_text() + "\nSELECT 1/0;\n")
-            with patch("memory_core.install.MIGRATION", migration), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch("memory_core.storage.install.MIGRATION", migration), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(dsn, Settings())
         with connect(dsn) as connection:
             self.assertIsNone(connection.execute("SELECT to_regnamespace('memory_core') AS value").fetchone()["value"])
@@ -238,7 +238,7 @@ class StorageTests(unittest.TestCase):
 
     def test_real_cli_and_default_store_entry(self):
         env = {"PATH": os.environ["PATH"], "MEMORY_INSTALL_DSN": self.owner1536, "PYTHONDONTWRITEBYTECODE": "1"}
-        result = subprocess.run([sys.executable, "-m", "memory_core.install"], env=env, text=True, capture_output=True)
+        result = subprocess.run([sys.executable, "-m", "memory_core.storage.install"], env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("保留已有数据", result.stdout)
         with patch.dict(os.environ, {"MEMORY_DSN": self.app1536}, clear=True):

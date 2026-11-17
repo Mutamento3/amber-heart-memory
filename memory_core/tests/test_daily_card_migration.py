@@ -5,11 +5,11 @@ import sys
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.install import install, catalog_fingerprint, InstallationMismatch
-from memory_core.space import Participant, SpaceConfiguration, RevisionConflict
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, catalog_fingerprint, InstallationMismatch
+from memory_core.storage.space import Participant, SpaceConfiguration, RevisionConflict
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -76,7 +76,7 @@ class DailyCardMigrationTests(DatabaseTestCase):
         }
         env["MEMORY_INSTALL_DSN"] = self.owner
         result = subprocess.run(
-            [sys.executable, "-m", "memory_core.install", "--dimensions", "3"],
+            [sys.executable, "-m", "memory_core.storage.install", "--dimensions", "3"],
             env=env,
             capture_output=True,
             text=True,

@@ -31,7 +31,7 @@ GRANT CONNECT ON DATABASE memory_example TO memory_app;
 连接环境变量由使用者显式设置为完整连接串，包含 host、dbname、user 和相应凭据。密码不要写入本目录；程序不会自动读取任何 `.env`、旧项目配置或本机数据库 service 文件。
 
 ```bash
-python3 -m memory_core.install --dimensions 1536 --timezone Asia/Shanghai --day-start-hour 3
+python3 -m memory_core.storage.install --dimensions 1536 --timezone Asia/Shanghai --day-start-hour 3
 ```
 
 安装入口读取 `MEMORY_INSTALL_DSN`，运行入口读取 `MEMORY_DSN`，配置管理读取所有者的 `MEMORY_CONFIG_DSN`；安全占位示例见 `.env.example`。也可以显式传连接串调用 Python 接口。安装前由管理员完成扩展安装，随后建表和授权全部在同一次迁移事务内完成。首次安装创建 `memory_core` schema，不修改其他 schema 的表或数据。
@@ -89,20 +89,20 @@ python3 -m memory_core.install --dimensions 1536 --timezone Asia/Shanghai --day-
 本批 CLI 是同步的受信任服务端入口，不提供对外鉴权、供应商或真实模型默认值。显式设置应用 `MEMORY_DSN` 后：
 
 ```bash
-python3 -m memory_core.workflow --space example-space submit synthetic-material.json
-python3 -m memory_core.workflow --space example-space extract 1 --fixed-responses fixed-responses.json
-python3 -m memory_core.workflow --space example-space list --after-id 0 --limit 50
-python3 -m memory_core.workflow --space example-space show 1
-python3 -m memory_core.workflow --space example-space source 1
+python3 -m memory_core.daily.workflow --space example-space submit synthetic-material.json
+python3 -m memory_core.daily.workflow --space example-space extract 1 --fixed-responses fixed-responses.json
+python3 -m memory_core.daily.workflow --space example-space list --after-id 0 --limit 50
+python3 -m memory_core.daily.workflow --space example-space show 1
+python3 -m memory_core.daily.workflow --space example-space source 1
 ```
 
 审核前按刚读到的草稿 version 和配置 revision 填参；编辑会递增 version。以下是独立动作示例，确认与拒绝二选一，不顺序执行整段：
 
 ```bash
-python3 -m memory_core.workflow --space example-space edit 1 reviewed-payload.json --version 2 --revision 1
-python3 -m memory_core.workflow --space example-space approve 1 --version 2 --revision 1 \
+python3 -m memory_core.daily.workflow --space example-space edit 1 reviewed-payload.json --version 2 --revision 1
+python3 -m memory_core.daily.workflow --space example-space approve 1 --version 2 --revision 1 \
   --request-key review-example-1 --embedding-label fixed-synthetic-v1 --fixed-responses fixed-responses.json
-python3 -m memory_core.workflow --space example-space reject 1 --version 2
+python3 -m memory_core.daily.workflow --space example-space reject 1 --version 2
 ```
 
 材料文件字段为 source_key、request_key、segments，来源 source_kind 默认为 mainline；可选 business_date 仅用于显式日期。每段含唯一 segment_id、speaker（user/assistant）、text、带偏移 timestamp（无时间为 null）。`delete-source MATERIAL_ID` 删除完整原文，`expire --now OFFSET_TIMESTAMP` 按保留天数显式清理，不运行定时任务。固定文件使用 `FixedModels` 的 `extract` 请求文本到响应映射，两个岗位都是固定响应，未知输入明确失败。`selection_prompt/structure_prompt` 可供调用方离线准备精确输入的合成夹具。
@@ -114,7 +114,7 @@ python3 -m memory_core.workflow --space example-space reject 1 --version 2
 安装选择的是新空间默认模板，参与者必须由使用者显式填写。首次配置示例只使用虚构名字：
 
 ```bash
-python3 -m memory_core.space --space example-space \
+python3 -m memory_core.storage.space --space example-space \
   --user-name "Example User" --user-alias "User Alias" \
   --assistant-name "Example Assistant" --assistant-alias "Assistant Alias" \
   --ignored-term "dear"
@@ -135,9 +135,9 @@ python3 -m memory_core.space --space example-space \
 
 版本 9 按原主题名绑定模板项，保留主题与卡片编号、关联和历史留档；遇到改过名而无法对应模板的旧主题会停止并回滚，不猜测含义。当前无真实用户，合成预览可重建；将来已有数据须先明确整理映射。
 
-同一个 `python3 -m memory_core.install` 命令会将已支持的旧库升级到当前版本；`--target-version` 可选择仍受支持的目标版本，用于独立验证和分步升级。版本 1 的 SQL 保持原样；后续 SQL 的校验和逐个记录，已应用文件发生变化时拒绝运行。时间格式函数也随版本迁移更新，避免元数据升级后仍按旧版本读取时区。
+同一个 `python3 -m memory_core.storage.install` 命令会将已支持的旧库升级到当前版本；`--target-version` 可选择仍受支持的目标版本，用于独立验证和分步升级。版本 1 的 SQL 保持原样；后续 SQL 的校验和逐个记录，已应用文件发生变化时拒绝运行。时间格式函数也随版本迁移更新，避免元数据升级后仍按旧版本读取时区。
 
-`models.py` 定义抽取、嵌入、关键词清洗、专用精排、最终精排的调用契约。`http_models.py` 实现四个召回岗位，不选择默认型号；`completion_model.py` 为关键词、最终精排及网页摘要/日记共用聊天传输。`testing/fixed_models.py` 只供显式测试使用：每个输入必须有预先声明的固定响应，未知输入报错，错误和坏格式也按样本原样返回给待测解析器。它不是运行时降级模型。两个抽取岗位分别显式传入；未提供岗位或对应固定响应时失败，不回退到真实模型。
+`models/models.py` 定义抽取、嵌入、关键词清洗、专用精排、最终精排的调用契约。`models/http_models.py` 实现四个召回岗位，不选择默认型号；`models/completion_model.py` 为关键词、最终精排及网页摘要/日记共用聊天传输。`testing/fixed_models.py` 只供显式测试使用：每个输入必须有预先声明的固定响应，未知输入报错，错误和坏格式也按样本原样返回给待测解析器。它不是运行时降级模型。两个抽取岗位分别显式传入；未提供岗位或对应固定响应时失败，不回退到真实模型。
 
 ## 召回岗位配置
 
@@ -151,10 +151,10 @@ python3 -m memory_core.space --space example-space \
 
 `RecallService(SearchStore(dsn, space), settings=None)` 绑定受信任服务端已经授权的空间，默认设置直接构造 `RecallSettings()`；`RecallService.from_env(space)` 才显式读取召回环境项。没有隐式 `.env` 加载，没有用另一份配置把 false 改回 true。
 
-默认值唯一维护在 [recall_config.py](recall_config.py) 的 `RecallSettings` 字段中；下面的说明表由测试与程序核对。环境项缺省时直接使用该定义，整数格式错误回到对应默认值，负数按 0（关闭附文）处理。可离线查询，不需数据库或模型凭据：
+默认值唯一维护在 [recall/recall_config.py](recall/recall_config.py) 的 `RecallSettings` 字段中；下面的说明表由测试与程序核对。环境项缺省时直接使用该定义，整数格式错误回到对应默认值，负数按 0（关闭附文）处理。可离线查询，不需数据库或模型凭据：
 
 ```bash
-python3 -m memory_core.recall --show-defaults
+python3 -m memory_core.recall.recall --show-defaults
 ```
 
 | 环境项 | 默认值 |
@@ -182,7 +182,7 @@ python3 -m memory_core.recall --show-defaults
 固定响应入口：
 
 ```bash
-python3 -m memory_core.recall --space example-space --query "植物" --fixed-responses fixed-responses.json
+python3 -m memory_core.recall.recall --space example-space --query "植物" --fixed-responses fixed-responses.json
 ```
 
 可用 `--messages synthetic-messages.json` 提供合成历史，仅决定话尾；`--no-rerank` 显式跳过两级精排，返回粗排/替换后的前五。不带 `--fixed-responses` 时按显式环境配置装配 HTTP 岗位；没有配置的岗位走原有逐级降级。Python `recall` 要显式提供 embedder、cleaner、reranker、selector 四个岗位。
@@ -196,7 +196,7 @@ python3 -m memory_core.recall --space example-space --query "植物" --fixed-res
 ## 最小使用
 
 ```python
-from memory_core.postgres import KeywordToken, PostgresStore
+from memory_core.storage.postgres import KeywordToken, PostgresStore
 
 store = PostgresStore.from_env(space_id="example-space")
 # 合成向量用于演示接口，不是可用的嵌入模型输出。
@@ -252,12 +252,12 @@ python3 memory_core/dev/environment.py destroy
 `ConversationStore.expire(now=带偏移时间)` 是清理入口，由网页每日任务自动调度：清空到期轮次的正文、工具载荷、冻结内容及召回记录，保留编号和来源墓碑；已复制到 `source_materials` 的原文以 `segment_id=conversation-message:<消息编号>` 关联，同事务清空相应材料，已生成卡片保留。迟到的生成任务不能把已过期正文写回来。冻结全文仅供正在进行的轮次重放，结束即释放，后续对话页读取组成清单。摘要结果表在 3D 保存完整轮次的实际覆盖关系，不能把消息最大编号当成唯一消费状态。
 
 
-轮次事务由 `conversation_rounds.py` 维护，不含图片数据的冻结与工具结果配对由 `conversation_context.py` 维护，`ConversationStore` 仍是统一入口。`begin` 返回轮次/请求编号、随机占用凭证与仅含系统词和当前消息的初始请求；首轮由代理调用 `history_input` 和 `save_context` 组装托管历史后才发上游，工具续轮用冻结前缀与前端本轮消息组装请求，精简续轮由账本补全；同空间其他请求明确冲突，不排队花钱。`finish` 只有凭证、轮次和当前步骤仍一致才能提交，最后一步成功时原子采用候选；工具等待不会提前替换。`renew` 只续当前步骤；`expire_leases` 在到期后把轮次标未完成并释放冻结，支持多 worker 按行跳过锁处理。保留期清理与这些操作统一先锁空间状态再锁轮次，清理后迟到结果不能复活原文。
+轮次事务由 `conversations/conversation_rounds.py` 维护，不含图片数据的冻结与工具结果配对由 `conversations/conversation_context.py` 维护，`ConversationStore` 仍是统一入口。`begin` 返回轮次/请求编号、随机占用凭证与仅含系统词和当前消息的初始请求；首轮由代理调用 `history_input` 和 `save_context` 组装托管历史后才发上游，工具续轮用冻结前缀与前端本轮消息组装请求，精简续轮由账本补全；同空间其他请求明确冲突，不排队花钱。`finish` 只有凭证、轮次和当前步骤仍一致才能提交，最后一步成功时原子采用候选；工具等待不会提前替换。`renew` 只续当前步骤；`expire_leases` 在到期后把轮次标未完成并释放冻结，支持多 worker 按行跳过锁处理。保留期清理与这些操作统一先锁空间状态再锁轮次，清理后迟到结果不能复活原文。
 
-版本 11 的 [011_hosted_context.sql](migrations/011_hosted_context.sql) 增加空间人设、卡片 `used_count/last_used_at` 及按时间线位置查询各版本的索引，不修改五张对话表的字段或旧迁移。`set_persona` 走既有配置所有者与修订锁；普通应用只读人设。`conversation_history.py` 负责当前版本历史、图片描述/占位、组装清单和冻结记录；固定聊天文字在 `chat_text.py`，两个自有工具的历史卡片由 `tool_history.py` 拼接。`finish(..., reported=[本轮本地编号], reported_none=False)` 仅认可冻结记录中的编号，明确报告“无”时用 `reported_none=True` 保存 `reported_unused`，不增加计数，在同一事务里保存回执、计数和正文；同一位置的工具步骤、重试/重做不重复增加同卡计数。前端可见正文的匹配指纹仍支持独立入参，代理已使用剥离回执后的正文。
+版本 11 的 [011_hosted_context.sql](migrations/011_hosted_context.sql) 增加空间人设、卡片 `used_count/last_used_at` 及按时间线位置查询各版本的索引，不修改五张对话表的字段或旧迁移。`set_persona` 走既有配置所有者与修订锁；普通应用只读人设。`conversations/conversation_history.py` 负责当前版本历史、图片描述/占位、组装清单和冻结记录；固定聊天文字在 `conversations/chat_text.py`，两个自有工具的历史卡片由 `recall/tool_history.py` 拼接。`finish(..., reported=[本轮本地编号], reported_none=False)` 仅认可冻结记录中的编号，明确报告“无”时用 `reported_none=True` 保存 `reported_unused`，不增加计数，在同一事务里保存回执、计数和正文；同一位置的工具步骤、重试/重做不重复增加同卡计数。前端可见正文的匹配指纹仍支持独立入参，代理已使用剥离回执后的正文。
 
 
-`tool_history.py` 从本空间当前采用、未过期轮次的工具事件读取参数和客户端回传文字，直接拼接 `memory` / `mark_moment` 历史卡片，不调用模型，也不重新读取卡片或书签。`memory` 保留参数、总数/本页数量/下一页位置、相关候选边界和编号/日期/标题/状态；普通卡摘要（get 为正文）最多 500 字，主题总结最多 4000 字，search/browse 每次最多列 12 条。公开工具返回没有事件跨度字段，主题总结使用已有日期、标题和“主题总结”标记。`get_sources` 照自用版列出这一页全部来源目录，不截 12 条、不重放来源全文；`list_topics` 和可识别的查询错误同样留卡。书签卡保留动作、分区或编号和短结果摘要。公开版不加入模型重排信息或不存在的 tool_trace 回查提示。
+`recall/tool_history.py` 从本空间当前采用、未过期轮次的工具事件读取参数和客户端回传文字，直接拼接 `memory` / `mark_moment` 历史卡片，不调用模型，也不重新读取卡片或书签。`memory` 保留参数、总数/本页数量/下一页位置、相关候选边界和编号/日期/标题/状态；普通卡摘要（get 为正文）最多 500 字，主题总结最多 4000 字，search/browse 每次最多列 12 条。公开工具返回没有事件跨度字段，主题总结使用已有日期、标题和“主题总结”标记。`get_sources` 照自用版列出这一页全部来源目录，不截 12 条、不重放来源全文；`list_topics` 和可识别的查询错误同样留卡。书签卡保留动作、分区或编号和短结果摘要。公开版不加入模型重排信息或不存在的 tool_trace 回查提示。
 
 识别直接名称、Kelivo 的服务器限定名及已知消歧后缀、Operit 的服务器限定名和 package_proxy/proxy 封装；只有同时匹配公开工具返回格式才生成卡片。名称被截断、未知改名、未知返回格式、图片或其他无法解析的结果均回退原来的名字/已返回或未返回一行。待返回调用不伪造结果；非自有工具不回放参数或结果。工具卡仍不是实际 AI 正文，不改变未获回应/未完成的判断。日记、及时摘要、每日抽卡继续经 `conversation_material` 只读取聊天正文，防止把查到的历史当成当天新原料。保留期清理仍清空原始工具载荷，卡片不另建表、不留可复活的副本。
 
@@ -268,14 +268,14 @@ python3 memory_core/dev/environment.py destroy
 
 一级摘要默认满 28 条触发，最旧 24 条（12 轮）进入摘要、最后两轮接力；字符超限可以提前触发，但仍保留接力。未合并一级摘要满 8 份，将最旧三份合成二次摘要，保留原始摘要，只在成功后改用合并结果。注入仅取当前请求所属业务日，全部有效二次摘要及未合并一级摘要按来源顺序排列。摘要稳定段位于人设/日记位后、原话前，工具续轮重放冻结内容。
 
-`summary_policy.py` 单处定义阈值与整轮长度保护，`summaries.py` 维护短事务、覆盖和跨 worker 会话锁；摘要存储不导入 HTTP 客户端。公开提示词、参与者称呼、摘要注入及省略提示集中在 `chat_text.py`。模型岗位、环境配置、后台调度与只读页面见 `memory_web/README.md`。保留期清理扩展现有 `ConversationStore.expire`：一级摘要及相关二次摘要随覆盖原话清空正文，保留覆盖墓碑，不改已生成卡片；自动调度由网页每日任务提供。
+`daily/summary_policy.py` 单处定义阈值与整轮长度保护，`daily/summaries.py` 维护短事务、覆盖和跨 worker 会话锁；摘要存储不导入 HTTP 客户端。公开提示词、参与者称呼、摘要注入及省略提示集中在 `conversations/chat_text.py`。模型岗位、环境配置、后台调度与只读页面见 `memory_web/README.md`。保留期清理扩展现有 `ConversationStore.expire`：一级摘要及相关二次摘要随覆盖原话清空正文，保留覆盖墓碑，不改已生成卡片；自动调度由网页每日任务提供。
 
 
 ## 日记与每日任务（版本 13）
 
-[013_diaries_and_daily_tasks.sql](migrations/013_diaries_and_daily_tasks.sql) 新增两张表，不修改已有原话字段。`DiaryStore` 以结束日期的全部当前采用轮次为材料，和摘要共用 `conversation_material.py` 的正文组装；保存时复核来源指纹、版本、保留期与空间设置。日记正文和任务成功状态共同提交，重复键、执行次数和跨 worker 会话锁保证发布幂等。人工编辑使用日记修订号，并永久标记用户修改；已有日记不被自动任务重写。
+[013_diaries_and_daily_tasks.sql](migrations/013_diaries_and_daily_tasks.sql) 新增两张表，不修改已有原话字段。`DiaryStore` 以结束日期的全部当前采用轮次为材料，和摘要共用 `conversations/conversation_material.py` 的正文组装；保存时复核来源指纹、版本、保留期与空间设置。日记正文和任务成功状态共同提交，重复键、执行次数和跨 worker 会话锁保证发布幂等。人工编辑使用日记修订号，并永久标记用户修改；已有日记不被自动任务重写。
 
-`daily_policy.py` 按安装时区与业务日分界计算执行时刻、补写范围和最近日记篇数。`daily_tasks.py` 保存可扩展种类的执行结果与重试信息，不在核心导入模型客户端。网页服务负责唤醒和模型调用，配置及故障恢复边界见 `memory_web/README.md`。`history_input(..., recent_diary_count=3)` 返回最近完成日期的日记，`save_context` 将其放在人设后、摘要前并冻结版本。原话清理不删除日记，也不改变日记的用户编辑状态。
+`daily/daily_policy.py` 按安装时区与业务日分界计算执行时刻、补写范围和最近日记篇数。`daily/daily_tasks.py` 保存可扩展种类的执行结果与重试信息，不在核心导入模型客户端。网页服务负责唤醒和模型调用，配置及故障恢复边界见 `memory_web/README.md`。`history_input(..., recent_diary_count=3)` 返回最近完成日期的日记，`save_context` 将其放在人设后、摘要前并冻结版本。原话清理不删除日记，也不改变日记的用户编辑状态。
 
 
 ## 每日抽卡与审核方式（版本 14）
@@ -304,7 +304,7 @@ python3 memory_core/dev/environment.py destroy
 
 `016_delayed_approval.sql` 将原 `space_policies.review_mode` 转成布尔字段 `auto_approve_enabled`，新空间默认开启，原 auto→true、manual→false；不改历史迁移。草稿新增 `review_ready_at` TEXT 及待审查询索引，不新建表。旧完整待审草稿从升级时重新获得完整等待期；未整理完整的草稿在首次成功进入 pending 后开始计时。人工保存草稿修改会重计，自动整理/入库重试和开关变化不重计。关闭开关时只允许人工确认。
 
-`ReceiptJudgeStore`（`receipt_judge.py`）为模型未写回执的轮次提供夜间补判：`candidates(day)` 列出某业务日注入了卡片、最终请求回执为 `unreported` 的当前轮次；`apply` 每轮单独提交：先取得实时存档同一把空间对话锁（`conversation_rounds.lock_space_state`），复核该轮仍是当前版本、未删除且仍未报告后，按与模型回执相同的同位置去重规则计数，写入 `judged` / `judged_unused`。`parse` 只给出无效编号的轮次不写入，保持未报告。归档的 `receipt_health` 把这两种状态与模型报告同等计入。
+`ReceiptJudgeStore`（`daily/receipt_judge.py`）为模型未写回执的轮次提供夜间补判：`candidates(day)` 列出某业务日注入了卡片、最终请求回执为 `unreported` 的当前轮次；`apply` 每轮单独提交：先取得实时存档同一把空间对话锁（`conversation_rounds.lock_space_state`），复核该轮仍是当前版本、未删除且仍未报告后，按与模型回执相同的同位置去重规则计数，写入 `judged` / `judged_unused`。`parse` 只给出无效编号的轮次不写入，保持未报告。归档的 `receipt_health` 把这两种状态与模型报告同等计入。
 
 `ApprovalSettings` 从 `MEMORY_AUTO_APPROVE_AFTER_HOURS` 读取正整数小时，默认 48。它同时用于原子卡片和主题总结。等待按业务日计算：小时数向上取整为天数（48 小时即 2 天），草稿在其 `review_ready_at` 所属业务日之后第 N 天的那次每日任务中到期收录，与草稿在当天几点生成无关，避免每日任务稍后生成的草稿被多推迟一天。时区、业务日分界和每日时刻复用安装配置。补跑和失败重试按任务所属业务日判断到期，迟到的补跑不会把属于后一天的草稿提前收录。
 
@@ -332,7 +332,7 @@ python3 memory_core/dev/environment.py destroy
 
 只新增总结批次和来源关联两张表。来源表保存同空间卡片编号、内容校验摘要与 written/skipped 结果，不复制原卡正文；删卡时清空关联和校验摘要。模型必须为每个输入编号给出恰好一次结果，无跳过理由分类。模型输出不合格式最多重试一次；费用元数据随调用记入批次及月度任务，不保存模型思考或完整请求。
 
-提示词带入同空间、同主主题此前已生效总结的标题及每篇最多 800 字正文，包含已归档总结；待审、驳回及已撤销的总结不带入。已有总结单独标明只作衔接和避免重复的背景，不是本窗口来源、不进入吸收清单。写作要求明确禁止评论、风险提示、建议、学术腔和抽象套话，固定文字集中在 `topic_summary_text.py`。
+提示词带入同空间、同主主题此前已生效总结的标题及每篇最多 800 字正文，包含已归档总结；待审、驳回及已撤销的总结不带入。已有总结单独标明只作衔接和避免重复的背景，不是本窗口来源、不进入吸收清单。写作要求明确禁止评论、风险提示、建议、学术腔和抽象套话，固定文字集中在 `lifecycle/topic_summary_text.py`。
 
 总结只读待审，人工确认或等待默认 48 小时后的每日任务自动确认。两者使用同一事务：先验证来源和参与者，再算总结坐标，提交时再验证；写入总结卡、主题、写入子卡的已有实体引用和关键词，然后只吸收 written 子卡。skipped 标为已整理但继续正常召回、使用和归档，不再每月重复整理。模型输出为空且全部 skipped 时，不生成空的待审总结。
 
@@ -349,7 +349,7 @@ python3 memory_core/dev/environment.py destroy
 
 `MessageImages` 在短事务中核对空间、消息和保留期，写入一次最终结果。原 `content_parts`、匹配指纹、用户时间及轮次归属保持原样。`render_turn` 统一把成功结果渲染为 `[图片：描述]`，没有描述的图片仍用原占位，后续托管历史、及时摘要、日记与抽卡都读取它；稳定的原材料消息编号不变。图片只参与记忆描述，不加入本轮召回查询，纯图片仍跳过召回。
 
-当轮与工具续轮仍使用前端提供的原图，后台描述不能替换它。已冻结的本轮历史不刷新；描述写入后不可修改，此后的历史前缀保持稳定。摘要、日记和抽卡的已有来源校验会拒绝生成期间变动的输入，但不会追改已经生成的摘要、日记或卡片。提示词和图片标注集中在 `chat_text.py`，岗位与后台资源配置见配套网页说明。
+当轮与工具续轮仍使用前端提供的原图，后台描述不能替换它。已冻结的本轮历史不刷新；描述写入后不可修改，此后的历史前缀保持稳定。摘要、日记和抽卡的已有来源校验会拒绝生成期间变动的输入，但不会追改已经生成的摘要、日记或卡片。提示词和图片标注集中在 `conversations/chat_text.py`，岗位与后台资源配置见配套网页说明。
 
 ## 记忆书签（版本 20）
 
@@ -357,7 +357,7 @@ python3 memory_core/dev/environment.py destroy
 
 `BookmarkStore` 绑定空间执行 add/list/update/delete，支持短编号与完整 UUID，歧义拒绝。`RecentNotesStore.absorb` 把任务日期之前所有待整理的书签按记录时间倒序追加到四区顶部，与删书签、版本更新和每日任务完成共同提交。`recent_notes` 是独立任务种类，不消费聊天或日记原料、不调用模型，也不占代理轮次锁。时间与业务日沿用安装配置；多天漏跑一起补入。
 
-秘书提示词、四区编号、空白字数统计和结果校验在 `recent_note_tidy.py`；书签和注入共用 `recent_note_text.py` 的四区名称。`RecentNotesStore.save` 接收客户端确认的多个分区正文与 expected_version，一次事务保存，版本不一致整体拒绝；采纳整理时再核对最新 tidy_job_id 与基准版本，并将任务标为已采纳。建议套用与长期事项按起始日期排序由管理页完成。后台执行、取消、重启恢复和管理员接口见 [网页说明](../memory_web/README.md#记忆书签与夜间整理5b)。核心不导入私人模块、MCP SDK 或网页代码。
+秘书提示词、四区编号、空白字数统计和结果校验在 `bookmarks/recent_note_tidy.py`；书签和注入共用 `bookmarks/recent_note_text.py` 的四区名称。`RecentNotesStore.save` 接收客户端确认的多个分区正文与 expected_version，一次事务保存，版本不一致整体拒绝；采纳整理时再核对最新 tidy_job_id 与基准版本，并将任务标为已采纳。建议套用与长期事项按起始日期排序由管理页完成。后台执行、取消、重启恢复和管理员接口见 [网页说明](../memory_web/README.md#记忆书签与夜间整理5b)。核心不导入私人模块、MCP SDK 或网页代码。
 
 `ConversationHistory.history_input/save_context` 在同一空间历史读取中取四区内容，放在日记后、及时摘要前，空分区或全空时不发送占位。工具续轮继续使用首次冻结的上下文，已整理书签的后续变化只在新一轮生效。它不改变召回卡片的使用回执或统计。
 

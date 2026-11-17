@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import unittest
 
-from memory_core.extraction_contract import render_prompt, structure_template
+from memory_core.cards.extraction_contract import render_prompt, structure_template
 
 PREVIOUS_PARAGRAPH='不同经历层的独立事件确有必要时分卡，不输出 mixed，也不为更换标签而机械拆卡。正文和摘要都要说明核心事件属于外部现实、共同赛博经历、睡梦还是想象，不能只靠标签表达边界。'
 APPROVED_PARAGRAPH='不输出 mixed，也不拆分本卡。内容包含多个经历层时按核心事件选择，并在摘要中说明核心事件属于外部现实、共同赛博经历、睡梦还是想象。'

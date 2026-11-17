@@ -8,13 +8,13 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore, ConversationConflict
-from memory_core.db import connect
-from memory_core.install import install, MIGRATIONS, catalog_fingerprint
-from memory_core.space import Participant, SpaceConfiguration
-from memory_core.summaries import SummaryStore, active_summaries
-from memory_core.summary_policy import SummarySettings
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore, ConversationConflict
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, MIGRATIONS, catalog_fingerprint
+from memory_core.storage.space import Participant, SpaceConfiguration
+from memory_core.daily.summaries import SummaryStore, active_summaries
+from memory_core.daily.summary_policy import SummarySettings
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -500,7 +500,7 @@ class SummaryTests(DatabaseTestCase):
                 yield Connection()
 
         with patch(
-            "memory_core.summaries.connect", fail_second_coverage
+            "memory_core.daily.summaries.connect", fail_second_coverage
         ), self.assertRaises(RuntimeError):
             self.summary.save(
                 plan, {"content": "有效正文", "model": "synthetic"}, now=self.now
@@ -533,7 +533,7 @@ class SummaryTests(DatabaseTestCase):
             shutil.copytree(MIGRATIONS, migrations)
             path = migrations / "012_conversation_summaries.sql"
             path.write_text(path.read_text() + "\nSELECT 1/0;")
-            with patch("memory_core.install.MIGRATIONS", migrations), self.assertRaises(
+            with patch("memory_core.storage.install.MIGRATIONS", migrations), self.assertRaises(
                 psycopg.errors.DivisionByZero
             ):
                 install(self.owner, self.settings)

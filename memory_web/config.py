@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
-from memory_core.conversation_rounds import DEFAULT_TURN_TIMEOUT_SECONDS
-from memory_core.model_config import ModelRole, RecallModelsConfig
+from memory_core.conversations.conversation_rounds import DEFAULT_TURN_TIMEOUT_SECONDS
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
 
 @dataclass(frozen=True)
 class WebSettings:
@@ -68,7 +68,7 @@ class WebSettings:
         ModelRole(self.topic_summary_model,self.topic_summary_base_url,self.topic_summary_api_key)
         ModelRole(self.receipt_judge_model,self.receipt_judge_base_url,self.receipt_judge_api_key)
         ModelRole(self.recent_notes_tidy_model,self.recent_notes_tidy_base_url,self.recent_notes_tidy_api_key)
-        from memory_core.recent_note_tidy import TidyPolicy
+        from memory_core.bookmarks.recent_note_tidy import TidyPolicy
         TidyPolicy(self.recent_notes_soft_limit, self.recent_notes_target)
         ModelRole(self.image_description_model,self.image_description_base_url,self.image_description_api_key)
         ModelRole(self.image_description_backup_model)

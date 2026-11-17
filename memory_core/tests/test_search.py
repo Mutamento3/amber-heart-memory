@@ -9,16 +9,16 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import MIGRATIONS, catalog_fingerprint, install
-from memory_core.parents import replace_parents
-from memory_core.postgres import KeywordToken
-from memory_core.query import keyword_query, keyword_prompt
-from memory_core.recall_config import RecallSettings
-from memory_core.search import ThreeRouteSearch, _make_route_hit, merge_and_rank
-from memory_core.search_store import SearchStore
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.parents import replace_parents
+from memory_core.storage.postgres import KeywordToken
+from memory_core.recall.query import keyword_query, keyword_prompt
+from memory_core.recall.recall_config import RecallSettings
+from memory_core.recall.search import ThreeRouteSearch, _make_route_hit, merge_and_rank
+from memory_core.recall.search_store import SearchStore
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration
 from memory_core.testing.fixed_models import FixedModels
 from memory_core.tests.support import DatabaseTestCase
 
@@ -292,13 +292,13 @@ class SearchTests(DatabaseTestCase):
             fresh=catalog_fingerprint(c)
             c.execute('DROP SCHEMA memory_core CASCADE')
         install(self.owner,Settings(768),target_version=5)
-        from memory_core.graph_store import GraphStore
+        from memory_core.cards.graph_store import GraphStore
         self.config.configure('garden',Participant('Example Reader'),Participant('Example Guide'))
         old=GraphStore(self.app,'garden').write_card('Old Card',self.vector)
         with tempfile.TemporaryDirectory() as folder:
             for file in MIGRATIONS.glob('*.sql'): shutil.copyfile(file,Path(folder)/file.name)
             file=Path(folder)/'006_graph_retrieval.sql';file.write_text(file.read_text()+'\nSELECT 1/0;')
-            with patch('memory_core.install.MIGRATIONS',Path(folder)),self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch('memory_core.storage.install.MIGRATIONS',Path(folder)),self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner,Settings(768))
         with connect(self.owner) as c:
             self.assertEqual(c.execute('SELECT version FROM memory_core.installation').fetchone()['version'],5)

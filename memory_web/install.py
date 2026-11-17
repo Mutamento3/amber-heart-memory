@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 
 from psycopg import sql
-from memory_core.db import connect
-from memory_core.install import InstallationMismatch
-from memory_core.schema import TOPIC_DETAILS_VERSION
+from memory_core.storage.db import connect
+from memory_core.storage.install import InstallationMismatch
+from memory_core.storage.schema import TOPIC_DETAILS_VERSION
 
 MIGRATION = Path(__file__).with_name("migrations") / "001_admin_auth.sql"
 MIGRATION_2 = MIGRATION.with_name("002_space_access_keys.sql")

@@ -11,25 +11,25 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.archives import ArchiveStore
-from memory_core.archive_policy import ArchiveSettings
-from memory_core.cards import CardStore
-from memory_core.config import Settings
-from memory_core.daily_policy import DailySettings
-from memory_core.daily_tasks import DailyTasks, TaskLost
-from memory_core.db import connect
-from memory_core.install import install, MIGRATIONS
-from memory_core.parents import replace_parents
-from memory_core.postgres import PostgresStore
-from memory_core.review import PreparationError
-from memory_core.review_policy import ApprovalSettings
-from memory_core.search_store import SearchStore
-from memory_core.space import Participant, SpaceConfiguration, RevisionConflict
+from memory_core.lifecycle.archives import ArchiveStore
+from memory_core.lifecycle.archive_policy import ArchiveSettings
+from memory_core.cards.cards import CardStore
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_policy import DailySettings
+from memory_core.daily.daily_tasks import DailyTasks, TaskLost
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, MIGRATIONS
+from memory_core.storage.parents import replace_parents
+from memory_core.storage.postgres import PostgresStore
+from memory_core.cards.review import PreparationError
+from memory_core.cards.review_policy import ApprovalSettings
+from memory_core.recall.search_store import SearchStore
+from memory_core.storage.space import Participant, SpaceConfiguration, RevisionConflict
 from memory_core.tests.support import DatabaseTestCase
-from memory_core.topic_summaries import TopicSummaryStore, SummarySourceChanged
-from memory_core.topic_summary_contract import validate_response, TopicSummaryFormatError
-from memory_core.topic_summary_policy import TopicSummarySettings, plan_windows, next_month, event_date
-from memory_core.topic_summary_text import build_prompt
+from memory_core.lifecycle.topic_summaries import TopicSummaryStore, SummarySourceChanged
+from memory_core.lifecycle.topic_summary_contract import validate_response, TopicSummaryFormatError
+from memory_core.lifecycle.topic_summary_policy import TopicSummarySettings, plan_windows, next_month, event_date
+from memory_core.lifecycle.topic_summary_text import build_prompt
 
 NOW = datetime.fromisoformat('2026-11-03T03:16:00+08:00')
 
@@ -345,7 +345,7 @@ class TopicMigrationTests(DatabaseTestCase):
         with tempfile.TemporaryDirectory() as folder:
             shutil.copytree(MIGRATIONS,Path(folder)/'migrations')
             path=Path(folder)/'migrations/018_topic_summaries.sql';path.write_text(path.read_text()+'\nSELECT 1/0;')
-            with patch('memory_core.install.MIGRATIONS',path.parent),self.assertRaises(psycopg.errors.DivisionByZero):install(self.owner,core)
+            with patch('memory_core.storage.install.MIGRATIONS',path.parent),self.assertRaises(psycopg.errors.DivisionByZero):install(self.owner,core)
         with connect(self.app) as c:
             self.assertEqual(c.execute('SELECT version FROM memory_core.installation').fetchone()['version'],17)
             self.assertIsNone(c.execute("SELECT to_regclass('memory_core.topic_summary_batches') AS v").fetchone()['v'])

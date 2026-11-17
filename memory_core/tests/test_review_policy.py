@@ -4,13 +4,13 @@ import os
 import unittest
 from unittest.mock import patch
 
-from memory_core.config import Settings
-from memory_core.daily_policy import DailySettings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.review import ReviewStore
-from memory_core.review_policy import ApprovalSettings
-from memory_core.space import Participant, SpaceConfiguration, RevisionConflict
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_policy import DailySettings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.cards.review import ReviewStore
+from memory_core.cards.review_policy import ApprovalSettings
+from memory_core.storage.space import Participant, SpaceConfiguration, RevisionConflict
 from memory_core.testing.fixed_models import FixedModels
 from memory_core.tests import test_review as fixtures
 from memory_core.tests.support import DatabaseTestCase

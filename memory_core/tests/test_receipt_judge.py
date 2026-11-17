@@ -4,14 +4,14 @@ import unittest
 
 from psycopg.types.json import Jsonb
 
-from memory_core.archive_policy import ArchiveSettings, receipt_health
-from memory_core.config import Settings
-from memory_core.conversation_rounds import lock_space_state
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.postgres import PostgresStore
-from memory_core.receipt_judge import ReceiptJudgeFormatError, ReceiptJudgeStore, batches, material, parse
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.lifecycle.archive_policy import ArchiveSettings, receipt_health
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversation_rounds import lock_space_state
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.postgres import PostgresStore
+from memory_core.daily.receipt_judge import ReceiptJudgeFormatError, ReceiptJudgeStore, batches, material, parse
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 
 NOW = datetime.fromisoformat('2026-11-05T19:00:00+08:00')

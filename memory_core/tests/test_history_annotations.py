@@ -2,9 +2,9 @@
 
 import unittest
 
-from memory_core import chat_text
-from memory_core.config import Settings
-from memory_core.conversation_history import render_turn
+from memory_core.conversations import chat_text
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversation_history import render_turn
 
 
 class HistoryAnnotationTests(unittest.TestCase):

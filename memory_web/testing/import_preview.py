@@ -7,7 +7,7 @@ from time import sleep
 
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.extraction_model import ExtractionModel
+from memory_web.models.extraction_model import ExtractionModel
 from memory_web.testing import preview
 from memory_web.testing.import_model import SyntheticImportFixed
 from memory_web.testing.recent_notes import SyntheticSecretary

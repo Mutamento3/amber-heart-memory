@@ -9,15 +9,15 @@ from unittest.mock import patch
 import psycopg
 from psycopg.types.json import Jsonb
 
-from memory_core.archive_policy import ArchiveSettings, receipt_health
-from memory_core.archives import ArchiveStore
-from memory_core.clock import format_timestamp
-from memory_core.config import Settings
-from memory_core.daily_tasks import DailyTasks, TaskLost
-from memory_core.db import connect
-from memory_core.install import install, MIGRATIONS
-from memory_core.postgres import PostgresStore
-from memory_core.space import Participant, SpaceConfiguration, RevisionConflict
+from memory_core.lifecycle.archive_policy import ArchiveSettings, receipt_health
+from memory_core.lifecycle.archives import ArchiveStore
+from memory_core.storage.clock import format_timestamp
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_tasks import DailyTasks, TaskLost
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, MIGRATIONS
+from memory_core.storage.postgres import PostgresStore
+from memory_core.storage.space import Participant, SpaceConfiguration, RevisionConflict
 from memory_core.tests.support import DatabaseTestCase
 
 NOW = datetime.fromisoformat('2026-11-04T03:16:00+08:00')
@@ -204,7 +204,7 @@ class ArchiveTests(DatabaseTestCase):
             ArchiveStore(self.app,'two').restore(mid,expected_archived_at=old['archived_at'],now=restored)
 
     def test_actual_model_receipt_updates_usage_clock_before_archival(self):
-        from memory_core.conversations import ConversationStore
+        from memory_core.conversations.conversations import ConversationStore
         used,unused=self.card(),self.card()
         store=ConversationStore(self.app,'one')
         body=dict(model='synthetic',messages=[dict(role='user',content='合成本轮消息')])
@@ -261,7 +261,7 @@ class ArchiveMigrationTests(DatabaseTestCase):
             shutil.copytree(MIGRATIONS,Path(folder)/'migrations')
             target=Path(folder)/'migrations/017_card_archiving.sql'
             target.write_text(target.read_text()+'\nSELECT 1/0;\n')
-            with patch('memory_core.install.MIGRATIONS',Path(folder)/'migrations'),self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch('memory_core.storage.install.MIGRATIONS',Path(folder)/'migrations'),self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner,core,target_version=17)
         with connect(self.app) as c:
             self.assertEqual(c.execute('SELECT version FROM memory_core.installation').fetchone()['version'],16)

@@ -1,8 +1,8 @@
 from copy import deepcopy
 import unittest
 
-from memory_core.config import Settings
-from memory_core.conversation_context import (
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversation_context import (
     continuation_body,
     freeze_context,
     tool_result_pairs,

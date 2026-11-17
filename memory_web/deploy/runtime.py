@@ -5,10 +5,10 @@ import os
 
 from psycopg.conninfo import make_conninfo
 
-from memory_core.config import Settings
-from memory_core.http_models import EmbeddingDimensionError, HTTPRecallModels
-from memory_core.http_transport import ModelCallError
-from memory_core.model_config import ModelRole, RecallModelsConfig
+from memory_core.storage.config import Settings
+from memory_core.models.http_models import EmbeddingDimensionError, HTTPRecallModels
+from memory_core.models.http_transport import ModelCallError
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
 
 
 def verify_models(env, dimensions, *, transport=None):
@@ -113,7 +113,7 @@ def main():
         return
     os.environ.update(deploy_environment(os.environ))
     if args.action == "install":
-        from memory_core.install import install
+        from memory_core.storage.install import install
         from memory_web.install import install_web
 
         install(

@@ -5,11 +5,11 @@ import re
 import psycopg
 from psycopg import sql
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import context_for, context_digest
-from memory_core.install import install, MIGRATIONS
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import context_for, context_digest
+from memory_core.storage.install import install, MIGRATIONS
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 
 

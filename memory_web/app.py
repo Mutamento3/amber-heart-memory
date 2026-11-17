@@ -14,12 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 import psycopg
 from starlette.concurrency import run_in_threadpool
 
-from memory_core.db import connect
-from memory_core.cards import CardStore
-from memory_core.archives import ArchiveStore
-from memory_core.drafts import DraftStore, ExtractionConfigurationChanged, MaterialExpired, StructureInProgress
-from memory_core.topic_summaries import TopicSummaryStore
-from memory_core.extraction_contract import (
+from memory_core.storage.db import connect
+from memory_core.cards.cards import CardStore
+from memory_core.lifecycle.archives import ArchiveStore
+from memory_core.cards.drafts import DraftStore, ExtractionConfigurationChanged, MaterialExpired, StructureInProgress
+from memory_core.lifecycle.topic_summaries import TopicSummaryStore
+from memory_core.cards.extraction_contract import (
     ContractError,
     LAYERS,
     MAX_TOPICS,
@@ -31,8 +31,8 @@ from memory_core.extraction_contract import (
     RELATION_TYPES,
     iso_date,
 )
-from memory_core.graph_store import AmbiguousEntity
-from memory_core.schema import (
+from memory_core.cards.graph_store import AmbiguousEntity
+from memory_core.storage.schema import (
     DAILY_EXTRACTION_VERSION,
     DELAYED_APPROVAL_VERSION,
     DIARY_VERSION,
@@ -42,26 +42,26 @@ from memory_core.schema import (
     RECENT_NOTES_VERSION,
     IMPORT_VERSION,
 )
-from memory_core.config import Settings as CoreSettings
-from memory_core.diaries import DiaryConflict, DiaryStore
-from memory_core.http_models import HTTPRecallModels
-from memory_core.review import ReviewStore
-from memory_core.space import (
+from memory_core.storage.config import Settings as CoreSettings
+from memory_core.daily.diaries import DiaryConflict, DiaryStore
+from memory_core.models.http_models import HTTPRecallModels
+from memory_core.cards.review import ReviewStore
+from memory_core.storage.space import (
     Participant,
     RevisionConflict,
     SpaceConfiguration,
     topic_presets,
 )
-from .auth import AuthenticationError, RateLimited, Sessions
-from .catalog import Catalog
-from .static_assets import StaticAssets
+from .admin.auth import AuthenticationError, RateLimited, Sessions
+from .admin.catalog import Catalog
+from .admin.static_assets import StaticAssets
 from .config import WebSettings
-from .access_keys import AccessKeys, KeyConfigurationError
-from .proxy import attach_proxy
-from .mcp import attach_mcp
-from .daily_jobs import DailyJobs
-from .extraction_model import ExtractionModel
-from .import_routes import attach_imports, is_import_upload
+from .admin.access_keys import AccessKeys, KeyConfigurationError
+from .proxy.proxy import attach_proxy
+from .mcp.mcp import attach_mcp
+from .jobs.daily_jobs import DailyJobs
+from .models.extraction_model import ExtractionModel
+from .admin.import_routes import attach_imports, is_import_upload
 
 LOG = logging.getLogger("memory_web")
 STATIC = Path(__file__).with_name("static")
@@ -162,7 +162,7 @@ def create_app(
     catalog = Catalog(settings.dsn)
     config = SpaceConfiguration(settings.config_dsn)
     # Verify the ordinary application role without requiring any existing space.
-    from memory_core.postgres import PostgresStore
+    from memory_core.storage.postgres import PostgresStore
 
     PostgresStore(settings.dsn, "__startup__")
     with connect(settings.dsn) as connection:
@@ -464,7 +464,7 @@ def create_app(
         if not read:
             raise HTTPException(404, "空间不存在")
 
-    from .recent_note_routes import attach_recent_notes
+    from .admin.recent_note_routes import attach_recent_notes
     attach_recent_notes(app, settings, require_space, enabled=version>=RECENT_NOTES_VERSION, model=recent_note_models)
     attach_imports(app,settings,require_space,enabled=version>=IMPORT_VERSION,
         model=daily.extraction_models,clock=daily_clock,embedder=embedder,embedding_model=model_name)

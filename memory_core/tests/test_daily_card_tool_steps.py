@@ -1,13 +1,13 @@
 from copy import deepcopy
 from datetime import datetime,timedelta
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.daily_cards import DailyCardStore
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.space import SpaceConfiguration,Participant
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.cards.daily_cards import DailyCardStore
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.space import SpaceConfiguration,Participant
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_turns import call
 

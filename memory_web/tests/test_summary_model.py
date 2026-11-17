@@ -7,7 +7,7 @@ import unittest
 import httpx
 
 from memory_web.config import WebSettings
-from memory_web.summary_model import SummaryModel, SummaryModelError
+from memory_web.models.summary_model import SummaryModel, SummaryModelError
 
 
 class SummaryModelTests(unittest.TestCase):

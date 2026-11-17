@@ -11,13 +11,13 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import DraftStore, context_for, structure_input
-from memory_core.extraction_contract import (ContractError, CredentialContent, check_credentials,
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import DraftStore, context_for, structure_input
+from memory_core.cards.extraction_contract import (ContractError, CredentialContent, check_credentials,
     json_object, material_input, render_prompt, selection_result, structure)
-from memory_core.install import install, catalog_fingerprint, MIGRATIONS
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration
+from memory_core.storage.install import install, catalog_fingerprint, MIGRATIONS
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration
 from memory_core.testing.fixed_models import FixedModels
 from memory_core.tests.support import DatabaseTestCase
 
@@ -233,7 +233,7 @@ class DraftTests(DatabaseTestCase):
             source = Path(folder)/'source.json'
             source.write_text(json.dumps(dict(source_key='cli',request_key='cli',segments=[dict(segment_id='s1',speaker='user',text='Example User plans to study botany.',timestamp='2026-06-12T10:00:00+08:00')])))
             env={'PATH':os.environ['PATH'],'PYTHONDONTWRITEBYTECODE':'1','MEMORY_DSN':self.app}
-            command=[sys.executable,'-m','memory_core.workflow','--space','example']
+            command=[sys.executable,'-m','memory_core.daily.workflow','--space','example']
             result=subprocess.run(command+['submit',str(source)],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             extraction=json.loads(result.stdout)['extraction_id']
@@ -271,7 +271,7 @@ class DraftTests(DatabaseTestCase):
         with tempfile.TemporaryDirectory() as folder:
             for source in MIGRATIONS.glob('*.sql'):
                 (Path(folder)/source.name).write_text(source.read_text()+('\nSELECT 1/0;' if source.name.startswith('004') else ''))
-            with patch('memory_core.install.MIGRATIONS',Path(folder)), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch('memory_core.storage.install.MIGRATIONS',Path(folder)), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner,Settings(768),target_version=4)
         with connect(self.owner) as connection:
             self.assertEqual(connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'],3)

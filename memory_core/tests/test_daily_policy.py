@@ -1,8 +1,8 @@
 from datetime import date, datetime
 import unittest
 
-from memory_core.config import Settings
-from memory_core.daily_policy import DailySettings
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_policy import DailySettings
 
 
 class DailyPolicyTests(unittest.TestCase):

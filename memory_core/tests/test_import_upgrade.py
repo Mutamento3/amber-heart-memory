@@ -1,12 +1,12 @@
 """Version 21 → 22 using the real installer, schema snapshot and application role."""
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import DraftStore
-from memory_core.install import install, catalog_fingerprint
-from memory_core.imports import ImportStore
-from memory_core.import_formats import parse_upload
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import DraftStore
+from memory_core.storage.install import install, catalog_fingerprint
+from memory_core.imports.imports import ImportStore
+from memory_core.imports.import_formats import parse_upload
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 
 

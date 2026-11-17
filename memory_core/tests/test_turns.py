@@ -2,11 +2,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore, ConversationConflict, DuplicateRequest
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.space import SpaceConfiguration, Participant
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore, ConversationConflict, DuplicateRequest
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.space import SpaceConfiguration, Participant
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -419,7 +419,7 @@ class TurnTests(DatabaseTestCase):
 
                 yield FailAdoption()
 
-        with patch("memory_core.conversation_rounds.connect", fault_connection), self.assertRaises(
+        with patch("memory_core.conversations.conversation_rounds.connect", fault_connection), self.assertRaises(
             psycopg.errors.RaiseException
         ):
             self.store.finish(candidate, content="新的答案", finish_reason="stop")

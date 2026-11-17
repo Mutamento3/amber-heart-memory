@@ -6,11 +6,11 @@ import tempfile
 from unittest.mock import patch
 
 import psycopg
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.db import connect
-from memory_core.install import install, MIGRATIONS, catalog_fingerprint
-from memory_core.space import SpaceConfiguration, Participant, RevisionConflict
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.storage.db import connect
+from memory_core.storage.install import install, MIGRATIONS, catalog_fingerprint
+from memory_core.storage.space import SpaceConfiguration, Participant, RevisionConflict
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -98,7 +98,7 @@ class HostedHistoryTests(DatabaseTestCase):
             shutil.copytree(MIGRATIONS, migrations)
             path = migrations / "011_hosted_context.sql"
             path.write_text(path.read_text() + "\nSELECT 1/0;")
-            with patch("memory_core.install.MIGRATIONS", migrations), self.assertRaises(
+            with patch("memory_core.storage.install.MIGRATIONS", migrations), self.assertRaises(
                 psycopg.errors.DivisionByZero
             ):
                 install(self.owner, self.settings)
@@ -211,7 +211,7 @@ class HostedHistoryTests(DatabaseTestCase):
         self.assertIn("这轮回复未完成", str(upstream))
 
     def test_failed_empty_interruption_and_partial_have_exclusive_markers(self):
-        from memory_core import chat_text
+        from memory_core.conversations import chat_text
         for question, state, answer in (("失败前没收到正文", "upstream_failed", ""),
                 ("中断前没收到正文", "interrupted", ""),
                 ("中断前收到半段", "interrupted", "半段回答")):
@@ -253,7 +253,7 @@ class HostedHistoryTests(DatabaseTestCase):
         self.assertIn("America/New_York", str(second_upstream))
 
     def test_supplementary_pair_contains_configured_name_time_and_frozen_card_text(self):
-        from memory_core import chat_text
+        from memory_core.conversations import chat_text
         self.config.configure("one", Participant("小岚"), Participant("助手"), expected_revision=1)
         request = body("真实用户消息", [{"role": "system", "content": "前端系统词"}])
         record = self.store.begin(request, {"operation": "new"}, now=self.now)
@@ -279,7 +279,7 @@ class HostedHistoryTests(DatabaseTestCase):
         self.assertFalse(any(m["role"] == "system" for m in empty["messages"]))
 
     def test_tool_annotations_include_each_name_and_return_presence(self):
-        from memory_core.conversation_history import render_turn
+        from memory_core.conversations.conversation_history import render_turn
         tools = []
         for index, (name, status) in enumerate((("天气", "success"), ("联网搜索", "failure"),
                 ("查日历", "unknown"), ("读文件", None))):

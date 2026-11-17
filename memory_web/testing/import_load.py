@@ -28,15 +28,15 @@ def metrics():
 
 
 def server():
-    from memory_core.config import Settings
-    from memory_core.install import install
-    from memory_core.space import Participant, SpaceConfiguration
+    from memory_core.storage.config import Settings
+    from memory_core.storage.install import install
+    from memory_core.storage.space import Participant, SpaceConfiguration
     from memory_core.tests.support import DatabaseTestCase
     from memory_web.app import create_app
     from memory_web.config import WebSettings
-    from memory_web.extraction_model import ExtractionModel
+    from memory_web.models.extraction_model import ExtractionModel
     from memory_web.install import install_web
-    from memory_web.password import write_password
+    from memory_web.admin.password import write_password
     from memory_web.testing.import_model import SyntheticImportFixed
     import uvicorn
 

@@ -11,25 +11,25 @@ import httpx
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from memory_core.config import Settings
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.model_config import ModelRole, RecallModelsConfig
-from memory_core.postgres import PostgresStore
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
+from memory_core.storage.postgres import PostgresStore
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_topic_summaries import NOW, Embeddings, response
-from memory_core.topic_summaries import TopicSummaryStore
-from memory_core.topic_summary_policy import TopicSummarySettings
+from memory_core.lifecycle.topic_summaries import TopicSummaryStore
+from memory_core.lifecycle.topic_summary_policy import TopicSummarySettings
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
+from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.diary_model import SyntheticDiaryModel
-from memory_web.topic_summary_model import TopicSummaryModel
+from memory_web.models.topic_summary_model import TopicSummaryModel
 
 ORIGIN='https://memory.example.test'
 

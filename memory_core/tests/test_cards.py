@@ -1,12 +1,12 @@
 import psycopg
 from psycopg.types.json import Jsonb
 
-from memory_core.cards import CardStore
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.review import ReviewStore
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.cards.cards import CardStore
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.cards.review import ReviewStore
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests import test_review as fixtures
 from memory_core.tests.support import DatabaseTestCase
 
@@ -125,7 +125,7 @@ class CardTests(DatabaseTestCase):
         self.assertEqual(self.store.search_vectors(self.vector),[])
         self.assertEqual(self.store.search_keywords('植物'),[])
         self.assertEqual(self.approve(self.draft)['status'],'deleted')
-        from memory_core.daily_cards import terminal_drafts
+        from memory_core.cards.daily_cards import terminal_drafts
         self.assertTrue(terminal_drafts(self.store.extraction(self.draft['extraction_id'])))
         with self.assertRaisesRegex(ValueError,'只保留计数'):
             self.store.source(self.draft['id'])

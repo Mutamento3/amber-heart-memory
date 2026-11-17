@@ -8,16 +8,16 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.space import SpaceConfiguration, Participant
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.space import SpaceConfiguration, Participant
 from memory_core.tests.support import DatabaseTestCase
-from memory_web.access_keys import AccessKeys
+from memory_web.admin.access_keys import AccessKeys
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.fake_upstream import FakeUpstream
 from memory_web.testing.summary_model import SyntheticSummaryModel
 

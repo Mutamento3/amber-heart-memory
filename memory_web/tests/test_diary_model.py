@@ -7,7 +7,7 @@ import unittest
 import httpx
 
 from memory_web.config import WebSettings
-from memory_web.diary_model import DiaryModel, DiaryModelError
+from memory_web.models.diary_model import DiaryModel, DiaryModelError
 
 DIARY_TEXT = "合成日记" * 25
 

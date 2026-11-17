@@ -2,9 +2,9 @@
 
 import json
 
-from memory_core.tool_history import render_tool_card
-from memory_web.mcp_tools import render_result
-from memory_web.bookmark_tool import render_bookmarks
+from memory_core.recall.tool_history import render_tool_card
+from memory_web.mcp.mcp_tools import render_result
+from memory_web.mcp.bookmark_tool import render_bookmarks
 
 
 def events(name, args, text, identifier='synthetic-call'):

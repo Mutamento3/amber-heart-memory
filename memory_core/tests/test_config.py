@@ -4,8 +4,8 @@ import subprocess
 import sys
 import unittest
 
-from memory_core.clock import business_day_bounds, business_day_label, format_timestamp
-from memory_core.config import Settings
+from memory_core.storage.clock import business_day_bounds, business_day_label, format_timestamp
+from memory_core.storage.config import Settings
 
 
 class ConfigTests(unittest.TestCase):
@@ -59,7 +59,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_cli_rejects_large_dimensions_before_credentials_or_connection(self):
         env = {"PATH": os.environ["PATH"], "PYTHONDONTWRITEBYTECODE": "1"}
-        result = subprocess.run([sys.executable, "-m", "memory_core.install", "--dimensions", "2001"], env=env, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-m", "memory_core.storage.install", "--dimensions", "2001"], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn("HNSW", result.stderr)
         self.assertIn("2000", result.stderr)

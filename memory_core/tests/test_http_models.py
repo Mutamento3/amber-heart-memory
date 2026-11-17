@@ -5,11 +5,11 @@ import json
 
 import httpx
 
-from memory_core.http_models import EmbeddingDimensionError, HTTPRecallModels
-from memory_core.http_transport import ModelCallError, call_deadline
-from memory_core.model_config import ModelRole, RecallModelsConfig
-from memory_core.rerank import order_candidates
-from memory_core.rerank_input import ranking_query
+from memory_core.models.http_models import EmbeddingDimensionError, HTTPRecallModels
+from memory_core.models.http_transport import ModelCallError, call_deadline
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
+from memory_core.recall.rerank import order_candidates
+from memory_core.recall.rerank_input import ranking_query
 from memory_core.testing.provider_server import ProviderServer
 
 

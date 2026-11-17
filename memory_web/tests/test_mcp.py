@@ -14,23 +14,23 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from psycopg.types.json import Jsonb
 
-from memory_core.cards import CardStore
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.memory_query import MemoryQueryStore
-from memory_core.model_config import ModelRole, RecallModelsConfig
-from memory_core.postgres import KeywordToken
-from memory_core.recall import RecallService
-from memory_core.recall_config import RecallSettings
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.cards.cards import CardStore
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.recall.memory_query import MemoryQueryStore
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
+from memory_core.storage.postgres import KeywordToken
+from memory_core.recall.recall import RecallService
+from memory_core.recall.recall_config import RecallSettings
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.testing.provider_server import ProviderServer
-from memory_web.access_keys import AccessKeys
+from memory_web.admin.access_keys import AccessKeys
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.fake_upstream import FakeUpstream
 from memory_web.testing.recall_models import SyntheticRecallModels
 
@@ -363,10 +363,10 @@ class MCPTests(DatabaseTestCase):
         self.assertEqual(len(self.models.calls), calls)
 
     def test_our_tool_cards_persist_into_next_round_but_not_body_material(self):
-        from memory_core.conversations import ConversationStore
-        from memory_core.conversation_material import dialogue_input, extraction_segments
-        from memory_core.space import read_policy
-        from memory_core.tool_history import render_tool_card
+        from memory_core.conversations.conversations import ConversationStore
+        from memory_core.conversations.conversation_material import dialogue_input, extraction_segments
+        from memory_core.storage.space import read_policy
+        from memory_core.recall.tool_history import render_tool_card
         from memory_web.testing.tool_cards import events
 
         mid = self.card('合成复查约定', is_milestone=True)

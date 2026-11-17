@@ -8,15 +8,15 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.space import Participant, SpaceConfiguration
-from memory_core.review import ReviewStore
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.space import Participant, SpaceConfiguration
+from memory_core.cards.review import ReviewStore
 from memory_core.testing.fixed_models import FixedModels
-from memory_core.conversations import ConversationStore
+from memory_core.conversations.conversations import ConversationStore
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.data import draft
 
 
@@ -121,7 +121,7 @@ def main():
         fixtures["embed"].update(other["embed"])
         fixtures["embed"]["浏览器修改后的摘要"] = [1, 0, 0]
     if not resume:
-        from memory_core.cards import CardStore
+        from memory_core.cards.cards import CardStore
         archive_store=ReviewStore(app,'sample')
         topic=archive_store.topics()[0]['id']
         for title,stamp in [
@@ -137,9 +137,9 @@ def main():
     if not resume:
         store = ConversationStore(app, 'sample')
         from datetime import datetime, timedelta, timezone
-        from memory_core.clock import business_day_bounds, business_day_label
-        from memory_core.daily_tasks import DailyTasks
-        from memory_core.diaries import DiaryStore
+        from memory_core.storage.clock import business_day_bounds, business_day_label
+        from memory_core.daily.daily_tasks import DailyTasks
+        from memory_core.daily.diaries import DiaryStore
 
         moment = datetime.now(timezone.utc)
         today = business_day_label(moment, store.settings)
@@ -189,20 +189,20 @@ def main():
             store.finish(record, content=answer, state=state, finish_reason='stop' if state == 'complete' else None,
                 reported=[1] if used is True else [], reported_none=used is False)
             if isinstance(content,list):
-                from memory_core.message_images import MessageImages
+                from memory_core.conversations.message_images import MessageImages
                 captions=MessageImages(app,'sample')
                 source=captions.source(record)
                 captions.publish(source['message_id'],[dict(description='合成的窗边绿植截图。',calls=[dict(
                     model='synthetic-preview-image',state='succeeded',usage=None,code=None)])])
-        from memory_core.summaries import SummaryStore
-        from memory_core.summary_policy import SummarySettings
+        from memory_core.daily.summaries import SummaryStore
+        from memory_core.daily.summary_policy import SummarySettings
 
         summaries = SummaryStore(
             app,
             "sample",
             SummarySettings(trigger_messages=4, retain_turns=1, rollup_trigger=3),
         )
-        from memory_core.clock import business_day_label
+        from memory_core.storage.clock import business_day_label
         from datetime import datetime, timezone
 
         day = business_day_label(datetime.now(timezone.utc), store.settings).isoformat()
@@ -232,7 +232,7 @@ def main():
             finish_reason="stop",
             reported_none=True,
         )
-        from memory_web.mcp_tools import render_result
+        from memory_web.mcp.mcp_tools import render_result
 
         messages = [{"role": "user", "content": "帮我查查土豆和打雷。"}]
         body = {"model": "synthetic-preview", "messages": messages}
@@ -259,8 +259,8 @@ def main():
         from memory_web.testing.topic_summaries import seed
         seed(owner,app,fixtures)
     if not resume:
-        from memory_core.recent_notes import RecentNotesStore
-        from memory_core.bookmarks import BookmarkStore
+        from memory_core.bookmarks.recent_notes import RecentNotesStore
+        from memory_core.bookmarks.bookmarks import BookmarkStore
         config.set_core_memory('sample', expected_revision=1,
             core_memory='小禾不喜欢浓咖啡，下午更愿意喝温热的茶。\n重要安排先一起商量，答应的事要放在心上。')
         RecentNotesStore(app, 'sample').save(dict(

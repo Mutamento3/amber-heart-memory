@@ -14,24 +14,24 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.imports import ImportStore
-from memory_core.pending_approval import PendingApprovalStore
-from memory_core.review_policy import ApprovalSettings
-from memory_core.install import install
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.imports.imports import ImportStore
+from memory_core.cards.pending_approval import PendingApprovalStore
+from memory_core.cards.review_policy import ApprovalSettings
+from memory_core.storage.install import install
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_import_formats import claude
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
-from memory_web.import_jobs import ImportBackoff, ImportJobs
+from memory_web.jobs.daily_jobs import DailyJobs
+from memory_web.jobs.import_jobs import ImportBackoff, ImportJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.import_model import SyntheticImportHTTP, SyntheticImportFixed
-from memory_core.extraction_contract import render_prompt
+from memory_core.cards.extraction_contract import render_prompt
 
 ORIGIN='https://memory.example.test'
 
@@ -54,7 +54,7 @@ class ImportLoadModelTests(unittest.TestCase):
         def advance(seconds):
             nonlocal moment
             moment+=seconds
-        with patch('memory_web.import_jobs.monotonic',lambda: moment), patch('memory_web.import_jobs.sleep',advance):
+        with patch('memory_web.jobs.import_jobs.monotonic',lambda: moment), patch('memory_web.jobs.import_jobs.sleep',advance):
             before=backoff.wait()
             backoff.limited(3)
             backoff.limited(3)
@@ -239,7 +239,7 @@ class WebImportTests(DatabaseTestCase):
         self.assertEqual(response.status_code,200,response.text)
         identifier=response.json()['id']
         self.assertEqual(self.http.get('/api/spaces/two/imports/'+identifier).status_code,400)
-        with patch('memory_web.import_routes.MAX_UPLOAD_BYTES',20):
+        with patch('memory_web.admin.import_routes.MAX_UPLOAD_BYTES',20):
             self.assertEqual(self.upload().status_code,413)
 
     def test_memory_has_one_structure_call_and_retains_user_text_date_and_safe_usage(self):

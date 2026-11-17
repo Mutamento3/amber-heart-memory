@@ -11,26 +11,26 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from memory_core.clock import business_day_bounds
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.daily_policy import DailySettings
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.http_models import HTTPRecallModels
-from memory_core.install import install
-from memory_core.model_config import ModelRole, RecallModelsConfig
-from memory_core.review import ReviewStore
-from memory_core.review_policy import ApprovalSettings
-from memory_core.drafts import DraftStore
-from memory_core.space import Participant, SpaceConfiguration, read_policy
+from memory_core.storage.clock import business_day_bounds
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.daily.daily_policy import DailySettings
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.models.http_models import HTTPRecallModels
+from memory_core.storage.install import install
+from memory_core.models.model_config import ModelRole, RecallModelsConfig
+from memory_core.cards.review import ReviewStore
+from memory_core.cards.review_policy import ApprovalSettings
+from memory_core.cards.drafts import DraftStore
+from memory_core.storage.space import Participant, SpaceConfiguration, read_policy
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
+from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.diary_model import SyntheticDiaryModel
 from memory_web.testing.extraction_model import SyntheticExtractionHTTP
 
@@ -470,7 +470,7 @@ class DailyExtractionTests(DatabaseTestCase):
 
     def test_late_daily_sweep_does_not_take_drafts_due_after_its_scheduled_time(self):
         from memory_web.testing.data import draft as material_draft
-        from memory_core.clock import format_timestamp
+        from memory_core.storage.clock import format_timestamp
         candidate,_=material_draft(self.app,'one','clock-only')
         start=business_day_bounds(self.day+timedelta(days=1),self.core)[0]
         self.now=start+timedelta(hours=7)
@@ -667,7 +667,7 @@ class DailyExtractionTests(DatabaseTestCase):
     def test_images_unanswered_and_incomplete_annotations_survive_without_tool_records(
         self,
     ):
-        from memory_core.chat_text import IMAGE_PLACEHOLDER, UNANSWERED, INCOMPLETE
+        from memory_core.conversations.chat_text import IMAGE_PLACEHOLDER, UNANSWERED, INCOMPLETE
 
         body = dict(
             model="synthetic-main",
@@ -767,7 +767,7 @@ class DailyExtractionTests(DatabaseTestCase):
             )
 
     def test_numeric_hash_in_source_key_is_not_mistaken_for_credentials(self):
-        from memory_core.conversation_material import extraction_segments
+        from memory_core.conversations.conversation_material import extraction_segments
 
         self.seed()
 
@@ -775,7 +775,7 @@ class DailyExtractionTests(DatabaseTestCase):
             segments, days, _ = extraction_segments(*args)
             return segments, days, "a" + "0" * 16 + "a" * 47
 
-        with patch("memory_core.daily_cards.extraction_segments", side_effect=material):
+        with patch("memory_core.cards.daily_cards.extraction_segments", side_effect=material):
             self.tick()
         self.assertEqual(self.task()["result"]["pending_count"], 1)
 

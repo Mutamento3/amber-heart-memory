@@ -9,23 +9,23 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import context_for, structure_input
-from memory_core.extraction_contract import render_prompt
-from memory_core.install import install
-from memory_core.parents import replace_parents
-from memory_core.postgres import KeywordToken
-from memory_core.query import keyword_prompt
-from memory_core.recall import RecallService
-from memory_core.recall_config import RecallSettings
-from memory_core.rerank_context import TailContext, address_terms, assistant_tail, entity_terms, literal_matches
-from memory_core.rerank_evidence import add_rerank_evidence
-from memory_core.rerank_input import format_document, ranking_query, selection_prompt
-from memory_core.review import ReviewStore
-from memory_core.search import ThreeRouteSearch
-from memory_core.search_store import SearchStore
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import context_for, structure_input
+from memory_core.cards.extraction_contract import render_prompt
+from memory_core.storage.install import install
+from memory_core.storage.parents import replace_parents
+from memory_core.storage.postgres import KeywordToken
+from memory_core.recall.query import keyword_prompt
+from memory_core.recall.recall import RecallService
+from memory_core.recall.recall_config import RecallSettings
+from memory_core.recall.rerank_context import TailContext, address_terms, assistant_tail, entity_terms, literal_matches
+from memory_core.recall.rerank_evidence import add_rerank_evidence
+from memory_core.recall.rerank_input import format_document, ranking_query, selection_prompt
+from memory_core.cards.review import ReviewStore
+from memory_core.recall.search import ThreeRouteSearch
+from memory_core.recall.search_store import SearchStore
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration
 from memory_core.testing.fixed_models import FixedModels
 from memory_core.tests.support import DatabaseTestCase
 
@@ -313,7 +313,7 @@ class RecallTests(DatabaseTestCase):
             self.run_recall(models)
 
     def test_cli_defaults_without_credentials_and_missing_query_argument(self):
-        command=[sys.executable,'-m','memory_core.recall']
+        command=[sys.executable,'-m','memory_core.recall.recall']
         env={k:v for k,v in os.environ.items() if k in ('PATH','PYTHONPATH','LANG')}
         result=subprocess.run(command+['--show-defaults'],env=env,capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
@@ -350,7 +350,7 @@ class RecallTests(DatabaseTestCase):
             command = [
                 sys.executable,
                 "-m",
-                "memory_core.recall",
+                "memory_core.recall.recall",
                 "--space",
                 "example",
                 "--query",
@@ -420,7 +420,7 @@ class RecallTests(DatabaseTestCase):
         fixed,ordered=self.models(rows,query='botany')
         with tempfile.TemporaryDirectory() as folder:
             file=Path(folder)/'fixed.json';file.write_text(json.dumps(fixed.fixtures))
-            args=[sys.executable,'-m','memory_core.recall','--space','example','--query','botany','--fixed-responses',str(file)]
+            args=[sys.executable,'-m','memory_core.recall.recall','--space','example','--query','botany','--fixed-responses',str(file)]
             env={k:v for k,v in os.environ.items() if k in ('PATH','PYTHONPATH','LANG')}
             env['MEMORY_DSN']=self.app
             result=subprocess.run(args,env=env,capture_output=True,text=True)

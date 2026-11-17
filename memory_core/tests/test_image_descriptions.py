@@ -8,18 +8,18 @@ from unittest.mock import patch
 
 import psycopg
 from psycopg.types.json import Jsonb
-from memory_core.chat_text import IMAGE_PLACEHOLDER
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.daily_cards import DailyCardStore
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.diaries import DiaryStore
-from memory_core.install import install,MIGRATIONS
-from memory_core.message_images import MessageImages
-from memory_core.space import SpaceConfiguration,Participant
-from memory_core.summaries import SummaryStore
-from memory_core.summary_policy import SummarySettings
+from memory_core.conversations.chat_text import IMAGE_PLACEHOLDER
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.cards.daily_cards import DailyCardStore
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.daily.diaries import DiaryStore
+from memory_core.storage.install import install,MIGRATIONS
+from memory_core.conversations.message_images import MessageImages
+from memory_core.storage.space import SpaceConfiguration,Participant
+from memory_core.daily.summaries import SummaryStore
+from memory_core.daily.summary_policy import SummarySettings
 from memory_core.testing.images import image_url
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_turns import call
@@ -144,7 +144,7 @@ class ImageMigrationTests(DatabaseTestCase):
         with tempfile.TemporaryDirectory() as folder:
             shutil.copytree(MIGRATIONS,Path(folder)/'migrations')
             file=Path(folder)/'migrations/019_image_descriptions.sql';file.write_text(file.read_text()+'\nSELECT 1/0;')
-            with patch('memory_core.install.MIGRATIONS',file.parent),self.assertRaises(psycopg.errors.DivisionByZero):install(self.owner,Settings(3))
+            with patch('memory_core.storage.install.MIGRATIONS',file.parent),self.assertRaises(psycopg.errors.DivisionByZero):install(self.owner,Settings(3))
         with connect(self.app) as c:self.assertEqual(c.execute('SELECT version FROM memory_core.installation').fetchone()['version'],18)
         self.assertTrue(install(self.owner,Settings(3),target_version=19));self.assertFalse(install(self.owner,Settings(3),target_version=19))
         with connect(self.app) as c:

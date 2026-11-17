@@ -3,7 +3,7 @@
 import asyncio
 import threading
 
-from memory_web.summary_model import SummaryModelError
+from memory_web.models.summary_model import SummaryModelError
 
 
 class SyntheticSummaryModel:

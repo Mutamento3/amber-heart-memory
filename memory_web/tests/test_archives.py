@@ -9,21 +9,21 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from memory_core.archive_policy import ArchiveSettings
-from memory_core.archives import ArchiveStore
-from memory_core.clock import format_timestamp
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.postgres import PostgresStore
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.lifecycle.archive_policy import ArchiveSettings
+from memory_core.lifecycle.archives import ArchiveStore
+from memory_core.storage.clock import format_timestamp
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.storage.postgres import PostgresStore
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_archives import NOW, seed_receipt
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
+from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.diary_model import SyntheticDiaryModel
 
 ORIGIN='https://memory.example.test'
@@ -79,8 +79,8 @@ class ArchiveWebTests(DatabaseTestCase):
         self.assertEqual(cards['items'][0]['source_date'],'1900-01-01')
         path=base+f'/cards/{october}'
         before=self.row(october)
-        from memory_core.completion_model import CompletionModel
-        from memory_core.http_models import HTTPRecallModels
+        from memory_core.models.completion_model import CompletionModel
+        from memory_core.models.http_models import HTTPRecallModels
         with patch.object(HTTPRecallModels,'embed',side_effect=AssertionError('no model call')),patch.object(CompletionModel,'complete_sync',side_effect=AssertionError('no model call')):
             response=self.http.post(path+'/restore',headers=self.headers,json={'expected_archived_at':before['archived_at']})
         self.assertEqual(response.status_code,200,response.text)

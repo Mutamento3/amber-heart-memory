@@ -2,14 +2,14 @@
 
 from datetime import datetime, timezone
 
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.postgres import PostgresStore
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.storage.postgres import PostgresStore
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.fixed_models import FixedModels
-from memory_core.topic_summaries import TopicSummaryStore
-from memory_core.topic_summary_contract import retrieval_summary
-from memory_core.topic_summary_policy import TopicSummarySettings
+from memory_core.lifecycle.topic_summaries import TopicSummaryStore
+from memory_core.lifecycle.topic_summary_contract import retrieval_summary
+from memory_core.lifecycle.topic_summary_policy import TopicSummarySettings
 
 
 def seed(owner, app, fixtures):

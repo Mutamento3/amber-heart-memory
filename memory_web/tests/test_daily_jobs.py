@@ -9,23 +9,23 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from memory_core.clock import business_day_bounds, format_timestamp
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.daily_policy import DailySettings
-from memory_core.daily_tasks import DailyTasks
-from memory_core.db import connect
-from memory_core.diaries import DiaryStore
-from memory_core.install import install
-from memory_core.space import Participant, SpaceConfiguration
-from memory_core.summaries import SummaryStore
-from memory_core.summary_policy import SummarySettings
+from memory_core.storage.clock import business_day_bounds, format_timestamp
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.daily.daily_policy import DailySettings
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import connect
+from memory_core.daily.diaries import DiaryStore
+from memory_core.storage.install import install
+from memory_core.storage.space import Participant, SpaceConfiguration
+from memory_core.daily.summaries import SummaryStore
+from memory_core.daily.summary_policy import SummarySettings
 from memory_core.tests.support import DatabaseTestCase
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.daily_jobs import DailyJobs
+from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.diary_model import SyntheticDiaryModel
 from memory_web.testing.fake_upstream import FakeUpstream
 

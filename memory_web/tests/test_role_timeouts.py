@@ -9,13 +9,13 @@ from unittest.mock import patch
 
 import httpx
 
-from memory_core.completion_model import CompletionModelError
+from memory_core.models.completion_model import CompletionModelError
 from memory_core.testing.provider_server import ProviderServer
 from memory_web.config import WebSettings
-from memory_web.diary_model import DiaryModel
-from memory_web.extraction_model import ExtractionModel
-from memory_web.summary_model import SummaryModel
-from memory_web.topic_summary_model import TopicSummaryModel
+from memory_web.models.diary_model import DiaryModel
+from memory_web.models.extraction_model import ExtractionModel
+from memory_web.models.summary_model import SummaryModel
+from memory_web.models.topic_summary_model import TopicSummaryModel
 
 
 REPLY = dict(choices=[dict(message=dict(content="合成结果", reasoning_content="不存储的合成思考"),

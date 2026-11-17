@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.install import MIGRATIONS, catalog_fingerprint, install
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration, read_policy
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.storage.install import MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration, read_policy
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -85,7 +85,7 @@ class AcquaintanceDateTests(DatabaseTestCase):
 
     def test_participants_and_date_roll_back_together_on_late_failure(self):
         before = self.policy()
-        with patch("memory_core.space.read_policy", side_effect=RuntimeError("injected after writes")), self.assertRaises(RuntimeError):
+        with patch("memory_core.storage.space.read_policy", side_effect=RuntimeError("injected after writes")), self.assertRaises(RuntimeError):
             self.config.configure("example", Participant("Renamed User"), self.assistant,
                 expected_revision=1, acquaintance_date="2024-02-29")
         self.assertEqual(self.policy(), before)
@@ -119,7 +119,7 @@ class AcquaintanceMigrationTests(DatabaseTestCase):
             shutil.copytree(MIGRATIONS, migrations)
             path = migrations / "008_space_acquaintance_date.sql"
             path.write_text(path.read_text() + "\nSELECT 1/0;\n")
-            with patch("memory_core.install.MIGRATIONS", migrations), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch("memory_core.storage.install.MIGRATIONS", migrations), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, Settings(3))
         with connect(self.owner) as connection:
             self.assertEqual(catalog_fingerprint(connection), before)

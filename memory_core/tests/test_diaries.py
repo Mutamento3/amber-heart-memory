@@ -7,13 +7,13 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.daily_tasks import DailyTasks, TaskLost
-from memory_core.db import connect
-from memory_core.diaries import DiaryConflict, DiarySourceChanged, DiaryStore
-from memory_core.install import MIGRATIONS, catalog_fingerprint, install
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.daily.daily_tasks import DailyTasks, TaskLost
+from memory_core.storage.db import connect
+from memory_core.daily.diaries import DiaryConflict, DiarySourceChanged, DiaryStore
+from memory_core.storage.install import MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -151,7 +151,7 @@ class DiaryTests(DatabaseTestCase):
         plan = self.diaries.plan(self.day, now=self.now)
         task = self.tasks.claim("diary", self.day, now=self.now)
         with patch(
-            "memory_core.diaries.finish_task",
+            "memory_core.daily.diaries.finish_task",
             side_effect=RuntimeError("synthetic commit failure"),
         ):
             with self.assertRaises(RuntimeError):
@@ -259,7 +259,7 @@ class DiaryTests(DatabaseTestCase):
             path = Path(directory) / "migrations/013_diaries_and_daily_tasks.sql"
             path.write_text(path.read_text() + "\nSELECT 1/0;")
             with patch(
-                "memory_core.install.MIGRATIONS", path.parent
+                "memory_core.storage.install.MIGRATIONS", path.parent
             ), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, self.settings)
         with connect(self.owner) as c:

@@ -10,23 +10,23 @@ from unittest.mock import patch
 import httpx
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from memory_core.chat_text import IMAGE_DESCRIPTION_PROMPT,IMAGE_PLACEHOLDER
-from memory_core.config import Settings
-from memory_core.conversations import ConversationStore
-from memory_core.db import connect
-from memory_core.install import install
-from memory_core.image_descriptions import validate_results
-from memory_core.space import SpaceConfiguration,Participant
+from memory_core.conversations.chat_text import IMAGE_DESCRIPTION_PROMPT,IMAGE_PLACEHOLDER
+from memory_core.storage.config import Settings
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.storage.db import connect
+from memory_core.storage.install import install
+from memory_core.conversations.image_descriptions import validate_results
+from memory_core.storage.space import SpaceConfiguration,Participant
 from memory_core.testing.images import image_url
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_image_descriptions import result,body
-from memory_web.access_keys import AccessKeys
+from memory_web.admin.access_keys import AccessKeys
 from memory_web.app import create_app
 from memory_web.config import WebSettings
-from memory_web.image_model import ImageModel
+from memory_web.models.image_model import ImageModel
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.fake_upstream import FakeUpstream
 
 ORIGIN='https://memory.example.test'
@@ -287,8 +287,8 @@ class ImageProxyTests(DatabaseTestCase):
         self.assertNotIn('image_descriptions',message)
         self.assertEqual(self.post(dict(model='synthetic-main',messages=[dict(role='user',content='接着聊。')])).status_code,200)
         self.drain()
-        from memory_core.summaries import SummaryStore
-        from memory_core.summary_policy import SummarySettings
+        from memory_core.daily.summaries import SummaryStore
+        from memory_core.daily.summary_policy import SummarySettings
         summaries=SummaryStore(self.app,'one',SummarySettings(trigger_messages=4,retain_turns=1))
         day=data['items'][0]['business_date']
         plan=summaries.next_plan(day)

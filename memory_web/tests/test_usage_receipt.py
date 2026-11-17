@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from memory_web.usage_receipt import UsageFilter, StreamReceipt, clean_response, encode
+from memory_web.proxy.usage_receipt import UsageFilter, StreamReceipt, clean_response, encode
 
 
 class UsageReceiptTests(unittest.TestCase):

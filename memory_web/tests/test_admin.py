@@ -16,21 +16,21 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.drafts import DraftStore
-from memory_core.install import install, InstallationMismatch
-from memory_core.keyword_index import build_rows
-from memory_core.postgres import PostgresStore
-from memory_core.review import ReviewStore
-from memory_core.schema import LATEST_VERSION
-from memory_core.space import Participant, SpaceConfiguration
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.drafts import DraftStore
+from memory_core.storage.install import install, InstallationMismatch
+from memory_core.cards.keyword_index import build_rows
+from memory_core.storage.postgres import PostgresStore
+from memory_core.cards.review import ReviewStore
+from memory_core.storage.schema import LATEST_VERSION
+from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_web.app import create_app
-from memory_web.auth import Sessions, RateLimited, AuthenticationError, BEIJING
+from memory_web.admin.auth import Sessions, RateLimited, AuthenticationError, BEIJING
 from memory_web.config import WebSettings
 from memory_web.install import install_web
-from memory_web.password import write_password
+from memory_web.admin.password import write_password
 from memory_web.testing.data import draft
 
 PASSWORD = "synthetic acceptance password"
@@ -219,7 +219,7 @@ class AdminTests(DatabaseTestCase):
         )
 
     def test_diary_excerpt_drops_title_and_folds_lines(self):
-        from memory_web.catalog import diary_excerpt
+        from memory_web.admin.catalog import diary_excerpt
         self.assertEqual(diary_excerpt("# 林舟的日记\n今天\n\n  去散步了。"), "今天 去散步了。")
         self.assertEqual(diary_excerpt("顾言的日记\n周六。"), "周六。")
         self.assertEqual(diary_excerpt("今天的日记很短。"), "今天的日记很短。")
@@ -291,7 +291,7 @@ class AdminTests(DatabaseTestCase):
         before = Sessions(self.app, self.password).login(PASSWORD, False)[0]
         replacement = "new synthetic administrator phrase"
         changed = subprocess.run(
-            [sys.executable, "-m", "memory_web.password", "--file", str(self.password)],
+            [sys.executable, "-m", "memory_web.admin.password", "--file", str(self.password)],
             input=replacement + "\n" + replacement + "\n",
             env={},
             text=True,
@@ -524,7 +524,7 @@ class AdminTests(DatabaseTestCase):
         after = client.get("/api/spaces/sample/cards/" + str(mid)).json()
         self.assertEqual(after["content"], before["content"])
         self.assertEqual(after["primary_topic_id"], before["primary_topic_id"])
-        with patch("memory_core.keyword_index.build_rows", side_effect=RuntimeError("fixed reindex failure")):
+        with patch("memory_core.cards.keyword_index.build_rows", side_effect=RuntimeError("fixed reindex failure")):
             with self.assertRaises(RuntimeError):
                 self.config.configure("sample", Participant("不会提交"), Participant("林舟"), expected_revision=2)
         latest = client.get("/api/spaces/sample/configuration").json()
@@ -582,8 +582,8 @@ class AdminTests(DatabaseTestCase):
         path=f"/api/spaces/sample/cards/{mid}"
         topics=self.http.get("/api/spaces/sample/configuration").json()["topics"]
         body=dict(title="合成银河观测档案",topic_ids=[topics[0]["id"]],is_milestone=True)
-        from memory_core.http_models import HTTPRecallModels
-        from memory_core.completion_model import CompletionModel
+        from memory_core.models.http_models import HTTPRecallModels
+        from memory_core.models.completion_model import CompletionModel
         with patch.object(HTTPRecallModels,"embed",side_effect=AssertionError("must not call embedding")), patch.object(CompletionModel,"complete_sync",side_effect=AssertionError("must not call chat")):
             response=self.write(path,body,method="PATCH")
         self.assertEqual(response.status_code,200,response.text)
@@ -631,7 +631,7 @@ class AdminTests(DatabaseTestCase):
         store=PostgresStore(self.app,"sample")
         mid=store.write_card("合成保留正文",[1,0,0],title="原卡标题")
         topic=self.http.get("/api/spaces/sample/configuration").json()["topics"][0]["id"]
-        from memory_core.cards import CardStore
+        from memory_core.cards.cards import CardStore
         def fail(stage,connection):
             connection.execute("SELECT 1/0")
         path=f"/api/spaces/sample/cards/{mid}"
@@ -700,7 +700,7 @@ class AdminTests(DatabaseTestCase):
         )
 
     def test_approved_templates_and_names_reach_the_structure_model(self):
-        from memory_core.space import topic_presets
+        from memory_core.storage.space import topic_presets
 
         presets = topic_presets()
         self.assertEqual(len(presets["lover"]), 11)
@@ -817,7 +817,7 @@ class AdminTests(DatabaseTestCase):
         self.assertEqual(client.get("/api/spaces/sample/cards").json()["total"], 0)
 
     def test_ambiguous_hidden_entity_is_reported_without_choosing_or_dropping_it(self):
-        from memory_core.graph_store import GraphStore
+        from memory_core.cards.graph_store import GraphStore
 
         self.space()
         item, fixtures = self.ready()
@@ -871,7 +871,7 @@ class AdminTests(DatabaseTestCase):
     def test_overview_counts_days_topics_recent_and_rejected_list(self):
         from datetime import date
 
-        from memory_web.catalog import Catalog
+        from memory_web.admin.catalog import Catalog
 
         self.space()
         actual, fixtures = self.ready()

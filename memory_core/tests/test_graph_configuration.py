@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 import psycopg
 
-from memory_core.config import Settings
-from memory_core.db import connect
-from memory_core.graph_store import AmbiguousEntity, GraphStore
-from memory_core.install import InstallationMismatch, MIGRATIONS, catalog_fingerprint, install
-from memory_core.postgres import KeywordToken, PostgresStore
-from memory_core.space import Participant, RevisionConflict, SpaceConfiguration, topic_presets
+from memory_core.storage.config import Settings
+from memory_core.storage.db import connect
+from memory_core.cards.graph_store import AmbiguousEntity, GraphStore
+from memory_core.storage.install import InstallationMismatch, MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.postgres import KeywordToken, PostgresStore
+from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration, topic_presets
 from memory_core.tests.support import DatabaseTestCase
 
 
@@ -218,18 +218,18 @@ class GraphConfigurationTests(DatabaseTestCase):
 
     def test_default_cli_configuration_entry(self):
         env = {"PATH": os.environ["PATH"], "MEMORY_CONFIG_DSN": self.owner, "PYTHONDONTWRITEBYTECODE": "1"}
-        result = subprocess.run([sys.executable, "-m", "memory_core.space", "--space", "cli-space",
+        result = subprocess.run([sys.executable, "-m", "memory_core.storage.space", "--space", "cli-space",
             "--user-name", "CLI User", "--user-alias", "CLI Alias", "--assistant-name", "CLI Assistant",
             "--ignored-term", "greeting", "--topic-template", "general"], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["revision"], 1)
         self.assertEqual(len(GraphStore(self.app, "cli-space").topics()), 8)
-        cleared = subprocess.run([sys.executable, "-m", "memory_core.space", "--space", "cli-space",
+        cleared = subprocess.run([sys.executable, "-m", "memory_core.storage.space", "--space", "cli-space",
             "--user-name", "CLI User", "--assistant-name", "CLI Assistant", "--expected-revision", "1",
             "--clear-ignored-terms"], env=env, capture_output=True, text=True)
         self.assertEqual(cleared.returncode, 0, cleared.stderr)
         self.assertEqual(GraphStore(self.app, "cli-space").policy()["ignored_terms"], [])
-        failure = subprocess.run([sys.executable, "-m", "memory_core.space", "--space", "cli-invalid",
+        failure = subprocess.run([sys.executable, "-m", "memory_core.storage.space", "--space", "cli-invalid",
             "--user-name", "[]", "--assistant-name", "PrivateNameFixture"], env=env, capture_output=True, text=True)
         self.assertEqual(failure.returncode, 2)
         self.assertNotIn("PrivateNameFixture", failure.stderr)
@@ -276,7 +276,7 @@ class GraphMigrationTests(DatabaseTestCase):
             for name in ("002_migration_registry.sql", "003_graph_and_space_policies.sql"):
                 content = (MIGRATIONS / name).read_text()
                 (Path(directory) / name).write_text(content + ("\nSELECT 1/0;" if name.startswith("003") else ""))
-            with patch("memory_core.install.MIGRATIONS", Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
+            with patch("memory_core.storage.install.MIGRATIONS", Path(directory)), self.assertRaises(psycopg.errors.DivisionByZero):
                 install(self.owner, Settings(768), target_version=3)
         with connect(self.owner) as connection:
             self.assertEqual(connection.execute("SELECT version FROM memory_core.installation").fetchone()["version"], 1)

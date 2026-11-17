@@ -466,6 +466,28 @@ Memory data lives in the database on the server, not in the git repository; don'
 - Installing on a personal computer has not been tested.
 - There are no public benchmark numbers for recall quality yet; the evaluation tools and a synthetic dataset are being prepared.
 
+## Repository layout
+
+```
+amber-heart-memory/
+├── README.md / README.en.md   Chinese and English docs
+├── LICENSE                    AGPL-3.0 license
+├── install.sh                 Install and upgrade entry point
+├── compose.yaml / Caddyfile   Containers and automatic HTTPS
+├── .env.example               Example config: models, domain and more
+├── docs/screenshots/          Screenshots used in the README
+├── memory_core/               Memory system core
+│   ├── storage/ cards/ recall/ conversations/ daily/
+│   │   lifecycle/ bookmarks/ imports/ models/      Code grouped by function
+│   ├── migrations/ presets/ prompts/               Database migrations, topic presets, prompts
+│   └── tests/                                      Tests
+└── memory_web/                Web service: admin web app, chat connection, MCP, background jobs
+    ├── app.py                 Entry point
+    ├── admin/ proxy/ mcp/ jobs/ models/            Code grouped by function
+    ├── static/                Admin web frontend
+    └── tests/                 Tests
+```
+
 ## License
 
 [AGPL-3.0](LICENSE). You are free to use and modify it, including commercially; but if you provide a modified version to others as a network service, you must publish the modified source code. Deploying it yourself for your own use is not affected by this.

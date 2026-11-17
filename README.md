@@ -464,6 +464,28 @@ git pull
 - 装在个人电脑上的方式没有实测。
 - 召回效果还没有公开的评测数字，评测工具和合成数据集在准备中。
 
+## 仓库结构
+
+```
+amber-heart-memory/
+├── README.md / README.en.md   中英文说明
+├── LICENSE                    AGPL-3.0 许可证
+├── install.sh                 安装和升级入口
+├── compose.yaml / Caddyfile   容器与自动 HTTPS 配置
+├── .env.example               模型、域名等配置示例
+├── docs/screenshots/          README 里的截图
+├── memory_core/               记忆系统核心
+│   ├── storage/ cards/ recall/ conversations/ daily/
+│   │   lifecycle/ bookmarks/ imports/ models/      按功能分组的代码
+│   ├── migrations/ presets/ prompts/               数据库迁移、主题预设、提示词
+│   └── tests/                                      测试
+└── memory_web/                网页服务：管理网页、聊天接入、MCP、后台任务
+    ├── app.py                 程序入口
+    ├── admin/ proxy/ mcp/ jobs/ models/            按功能分组的代码
+    ├── static/                管理网页前端
+    └── tests/                 测试
+```
+
 ## 许可证
 
 [AGPL-3.0](LICENSE)。你可以自由使用、修改，也可以商用；但如果把修改后的版本作为网络服务提供给别人使用，需要公开修改后的源代码。自己部署、自己用，不受这条限制。

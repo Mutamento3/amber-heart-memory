@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from memory_core.imports.import_formats import MAX_UPLOAD_BYTES, MAX_JSON_BYTES, ImportSource
 from memory_core.imports.import_stream import iter_upload, upload_limit_message
 from memory_core.imports.imports import ImportStore
-from memory_core.storage.schema import IMPORT_APPROVAL_VERSION
+from memory_core.storage.schema import IMPORT_APPROVAL_VERSION, IMPORT_LIFECYCLE_VERSION
 from ..jobs.import_jobs import ImportJobs
 
 
@@ -29,7 +29,7 @@ class ImportSelection(BaseModel):
     date_end: StrictStr | None = None
 
 
-class ImportStop(BaseModel):
+class ImportAction(BaseModel):
     model_config=ConfigDict(extra='forbid')
 
 
@@ -52,6 +52,7 @@ def attach_imports(app, settings, require_space, *, enabled, model=None, clock=N
         source=store(space)
         return dict(configured=jobs.model.configured,max_upload_bytes=MAX_UPLOAD_BYTES,
             max_json_bytes=MAX_JSON_BYTES,auto_approve_supported=source.schema_version>=IMPORT_APPROVAL_VERSION,
+            lifecycle_supported=source.schema_version>=IMPORT_LIFECYCLE_VERSION,
             jobs=source.list_jobs(now=jobs.clock()))
 
     @app.post('/api/spaces/{space}/imports/upload')
@@ -107,8 +108,17 @@ def attach_imports(app, settings, require_space, *, enabled, model=None, clock=N
         return result
 
     @app.post('/api/spaces/{space}/imports/{identifier}/stop')
-    def stop(space: str, identifier: UUID, body: ImportStop):
+    def stop(space: str, identifier: UUID, body: ImportAction):
         return store(space).stop(identifier,now=jobs.clock())
+
+    @app.post('/api/spaces/{space}/imports/{identifier}/discard')
+    def discard(space: str, identifier: UUID, body: ImportAction):
+        store(space).discard(identifier)
+        return {}
+
+    @app.post('/api/spaces/{space}/imports/{identifier}/end')
+    def end(space: str, identifier: UUID, body: ImportAction):
+        return store(space).end(identifier,now=jobs.clock())
 
     original=app.router.lifespan_context
 

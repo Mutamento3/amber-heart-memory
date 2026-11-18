@@ -25,7 +25,7 @@ class TopicPresetTests(DatabaseTestCase):
     def test_default_addresses_cli_override_and_omission_preserve_customization(self):
         install(self.owner, Settings(3))
         lover = self.configure()
-        self.assertEqual(lover["ignored_terms"], ["宝宝", "宝贝", "亲爱的", "老公", "老婆", "Daddy"])
+        self.assertEqual(lover["ignored_terms"], ["宝宝", "宝贝", "亲爱的", "老公", "老婆"])
         self.assertEqual(self.configure("general")["ignored_terms"], [])
         config = SpaceConfiguration(self.owner)
         custom = config.configure("lover", Participant("小禾", ["禾禾"]), Participant("林舟"),

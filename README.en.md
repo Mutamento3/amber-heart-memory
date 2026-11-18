@@ -397,6 +397,7 @@ Importing calls models to extract cards, which costs money. The preview page sho
 - [ChatGPT](docs/import/chatgpt.en.md)
 - [Claude](docs/import/claude.en.md)
 - [Gemini](docs/import/gemini.en.md)
+- [DeepSeek](docs/import/deepseek.en.md)
 - [Kelivo](docs/import/kelivo.en.md) (chats and memories)
 - [Memory files you organized yourself](docs/import/memory-file.en.md)
 

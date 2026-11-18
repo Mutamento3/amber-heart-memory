@@ -1,7 +1,10 @@
 """Real isolated Postgres, official-shaped synthetic uploads and synthetic models."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
+from threading import Barrier
+from uuid import uuid4
 
 import psycopg
 
@@ -199,6 +202,58 @@ class ImportStoreTests(DatabaseTestCase):
                 self.assertIsNone(second)
         with import_run_lock(self.app) as recovered:
             self.assertIsNotNone(recovered)
+
+    def test_end_waits_for_live_runner_and_releases_orphaned_work(self):
+        files = [('sample.md', '## 2025-03-14\n合成甲。\n\n## 2025-03-15\n合成乙。'.encode())]
+        job = self.upload('memory', files)
+        self.store.confirm(job['id'], now=self.now)
+        with import_run_lock(self.app) as guard:
+            self.assertIsNotNone(guard)
+            first = self.store.prepare_next(job['id'], now=self.now)
+            second = self.store.prepare_next(job['id'], now=self.now)
+            draft = self.store.extraction(second['extraction_id'])['drafts'][0]
+            self.store._claim_structure(draft, uuid4(), 60)
+            self.store.stop(job['id'], now=self.now)
+            with self.assertRaisesRegex(RevisionConflict, '还有正在处理'):
+                self.store.end(job['id'], now=self.now)
+        with self.assertRaisesRegex(RevisionConflict, '还有草稿正在整理'):
+            self.store.end(job['id'], now=self.now)
+        self.assertEqual(self.store.get(job['id'])['progress']['running'], 2)
+        self.assertEqual(self.store.extraction(first['extraction_id'])['status'], 'selected')
+        with connect(self.app) as c:
+            c.execute("""UPDATE memory_core.pending_memories
+                SET structure_claim_until=memory_core.format_timestamp(clock_timestamp() - interval '1 second')
+                WHERE id=%s""", (draft['id'],))
+        ended = self.store.end(job['id'], now=self.now)
+        self.assertEqual((ended['status'], ended['progress']['running']), ('completed', 0))
+        self.assertEqual(self.store.preview(self.upload('memory', files)['id'])['material_count'], 2)
+
+    def test_discard_and_confirm_serialize_on_the_preview(self):
+        job = self.upload()
+        simultaneous = Barrier(2)
+
+        def attempt(operation):
+            simultaneous.wait(timeout=5)
+            try:
+                operation()
+            except ValueError:
+                return False
+            return True
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            discard = pool.submit(attempt, lambda: self.store.discard(job['id']))
+            confirm = pool.submit(attempt, lambda: self.store.confirm(job['id'], now=self.now))
+            discarded, confirmed = discard.result(), confirm.result()
+        self.assertNotEqual(discarded, confirmed)
+        with connect(self.app) as c:
+            items = c.execute('SELECT count(*) AS n FROM memory_core.import_items WHERE job_id=%s',
+                (job['id'],)).fetchone()['n']
+        if confirmed:
+            self.assertEqual(self.store.get(job['id'])['status'], 'queued')
+            self.assertEqual(items, 1)
+        else:
+            self.assertEqual(self.store.list_jobs(), [])
+            self.assertEqual(items, 0)
 
     def test_configuration_change_pauses_without_calling_models_then_can_resume(self):
         job=self.upload()

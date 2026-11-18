@@ -395,6 +395,7 @@ cd amber-heart-memory
 - [ChatGPT](docs/import/chatgpt.md)
 - [Claude](docs/import/claude.md)
 - [Gemini](docs/import/gemini.md)
+- [DeepSeek](docs/import/deepseek.md)
 - [Kelivo](docs/import/kelivo.md)（聊天和记忆）
 - [你自己整理的记忆文件](docs/import/memory-file.md)
 

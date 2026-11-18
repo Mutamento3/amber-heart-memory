@@ -134,7 +134,7 @@ class OfficialFormatTests(unittest.TestCase):
         self.assertNotIn("合成脚本",answer)
 
     def test_gemini_takeout_zip_only_reads_gemini_activity(self):
-        files=uploaded(gemini(),"Takeout/My Activity/Gemini Apps/MyActivity.json")
+        files=uploaded(gemini(),"Takeout/我的活動/應用程式聊天記錄/MyActivity.json")
         files+=uploaded([dict(header="Search")],"Takeout/My Activity/Search/MyActivity.json")
         items=parse_upload("gemini",packed(files),SETTINGS)
         self.assertEqual(sum(len(item.segments) for item in items),4)

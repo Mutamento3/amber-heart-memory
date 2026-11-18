@@ -60,7 +60,7 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
     if type(daily_limit) is not int or daily_limit <= 0:
         raise ImportFormatError("每日抽卡额度必须是正整数")
     source = items[0].source
-    by_conversation = source in ("chatgpt", "claude", "kelivo")
+    by_conversation = source in ("chatgpt", "claude", "deepseek", "kelivo")
     conversations_items = [item for item in items if not item.is_kelivo_memory]
     memory_items = [item for item in items if item.is_kelivo_memory]
     used_per_day = used_per_day or {}

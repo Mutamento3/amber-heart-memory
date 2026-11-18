@@ -124,7 +124,7 @@ python3 -m memory_core.storage.space --space example-space \
 
 - 每个角色的名字和若干别名指向同一实体；角色之间不能重叠。实体规范化沿用 NFKC、大小写、空白及成对包裹符的规则，Python 查询使用同一个数据库规范化函数。
 - 版本 8 增加可选的 `acquaintance_date`（相识日），以 TEXT 保存有效的 `YYYY-MM-DD` 日历日期，不带时区；`NULL` 表示未设置。旧空间升级后为空，不补造日期。所有者可调用 `SpaceConfiguration.set_acquaintance_date(space, expected_revision=..., acquaintance_date="2024-02-29")` 单独修改，传 `None` 清空；`configure` 也接受此参数，省略时保留已有值。日期、参与者与修订号共同提交，应用角色只读。相识日修改仍递增配置修订以防覆盖；版本 9 的审核配置留档只记录参与者名字与别名，因此改日期不触发网页复核提醒。迁移不改写历史留档。当前只作为配置元数据，不自动写成记忆或加入抽取提示。
-- 纯称呼词单独保存为检索忽略词，不作为任何实体名字或别名。新恋人空间默认使用 `presets/ignored_terms.json` 中的宝宝、宝贝、亲爱的、老公、老婆、Daddy，通用空间默认为空；网页不提供填写入口。CLI 的 `--ignored-term` 可重复传入并覆盖清单，`--clear-ignored-terms` 清空；省略时保留已有值，新空间则取模板默认值。`clean_address_terms` 供关键词编排确定性清洗，参与者名字仍可检索；模型清洗只在消息长于 15 字或命中纯称呼词时执行。
+- 纯称呼词单独保存为检索忽略词，不作为任何实体名字或别名。新恋人空间默认使用 `presets/ignored_terms.json` 中的宝宝、宝贝、亲爱的、老公、老婆，通用空间默认为空；网页不提供填写入口。CLI 的 `--ignored-term` 可重复传入并覆盖清单，`--clear-ignored-terms` 清空；省略时保留已有值，新空间则取模板默认值。`clean_address_terms` 供关键词编排确定性清洗，参与者名字仍可检索；模型清洗只在消息长于 15 字或命中纯称呼词时执行。
 - 图起点默认只屏蔽该空间的两个参与者实体，集合直接读取参与者引用，不维护第二份编号列表。`filter_graph_seeds` 及其 SQL 校验使用同一记录，检查修订号、引用和空间；图路查询也读取同一配置，只限制起点，不屏蔽邻居遍历或关键词/向量路的相关卡片。
 - 版本 9 起 `SpaceConfiguration.edit_topic` 只保留所有者修改整理资格的能力，主题改名和说明编辑会明确拒绝；数据库也锁定主题名、模板项与兜底标记。资格读取与后续 SQL 都以同一数据库字段为准，当前不启动园丁或归档。
 - `source_retention_days=NULL` 表示原材料永久保留，正整数表示保留天数，零或负数报错。版本 4 已提供显式清理和来源删除状态；没有自动调度。删除原文只清空 segments、保留来源墓碑，不重新导入同一来源；草稿保存的短证据摘录仍可保留，完整原文显示“原文已删除”。
@@ -371,7 +371,7 @@ python3 memory_core/dev/environment.py destroy
 
 ## 导入（版本 22）
 
-`ImportStore` 在独立的 `import_jobs` / `import_items` 保存预览、选择和处理进度，`source_materials.material_kind` 明确区分聊天与用户记忆。`iter_upload` 以 ijson 流式逐条解析官方 ChatGPT/Claude/Gemini 的 JSON（ZIP 成员通过 `archive.open` 流式读取），以及 UTF-8 的 `## YYYY-MM-DD` 加正文文件；不读附件、思考或工具调用。ChatGPT 只从 `current_node` 回溯采用分支，支持分片；Claude 兼容两套消息键名；Gemini 从 `Prompted ` 标题取提问，把 `safeHtmlItem` 回答转成纯文本，跳过反馈等活动，不把附件提示或 Gem 名加入原文。
+`ImportStore` 在独立的 `import_jobs` / `import_items` 保存预览、选择和处理进度，`source_materials.material_kind` 明确区分聊天与用户记忆。`iter_upload` 以 ijson 流式逐条解析官方 ChatGPT/Claude/Gemini 的 JSON（ZIP 成员通过 `archive.open` 流式读取），以及 UTF-8 的 `## YYYY-MM-DD` 加正文文件；不读附件、思考或工具调用。ChatGPT 只从 `current_node` 回溯采用分支，支持分片；Claude 兼容两套消息键名；Gemini 从 `Prompted ` 标题取提问，把 `safeHtmlItem` 回答转成纯文本，跳过反馈等活动，不把附件提示或 Gem 名加入原文。核心版本 27 支持 DeepSeek 官方 ZIP 格式版本 1。逐个读取目录里列出的对话，沿 `current_message_id` 回溯当前分支，只保留正常提问和回复的文字。账号信息与附件条目保持未打开，超时消息与附加提示跳过。
 
 聊天按安装时区与业务日分界拆成“来源对话 × 日期”，原消息时间保留在证据中，走现有两步抽卡和全空间每日额度。记忆文件按用户指定日期保留每条正文，`submit_memory` 跳过挑选和评分门槛，由第二步补标题、摘要、主题与图谱，并按每日抽卡共用的成文规则决定是否改写表达；不占聊天每日额度。其 importance=10 只满足现有待审数据协议，不调用模型评分。两种第二步共用 `prompts/extraction.md` 的完整结构规则，`structure_variants.json` 只保留角色、成文边界、日期、输出字段与输入说明的差异；测试锁住聊天版本的完整渲染，除已批准的“不输出 mixed，也不拆分本卡”段落外，与拆分前逐字一致。
 

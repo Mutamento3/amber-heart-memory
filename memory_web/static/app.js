@@ -1,5 +1,5 @@
 import {coreMemoryPage, memosPage} from "./memos.js?v=39";
-import {importsPage} from "./imports.js?v=72";
+import {importsPage} from "./imports.js?v=75";
 import {readPersonaFile} from "./persona-file.js?v=1";
 
 const basePath = new URL(import.meta.url).pathname.replace(

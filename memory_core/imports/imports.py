@@ -11,12 +11,15 @@ from ..cards.drafts import DraftStore, ExtractionConfigurationChanged, MaterialE
 from ..cards.extraction_contract import check_credentials, material_input
 from .import_formats import ImportDay, ImportFormatError, SOURCES
 from .import_preview import preview
-from ..storage.schema import IMPORT_APPROVAL_VERSION, IMPORT_PROGRESS_VERSION, IMPORT_VERSION, KELIVO_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION
+from ..storage.schema import (DEEPSEEK_IMPORT_VERSION, IMPORT_APPROVAL_VERSION, IMPORT_LIFECYCLE_VERSION, IMPORT_PROGRESS_VERSION,
+    IMPORT_VERSION, KELIVO_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION)
 from ..storage.space import RevisionConflict, read_policy
 
 ACTIVE = ('queued', 'running')
 PAUSE_ERRORS = ('import_configuration_changed', 'import_material_expired')
 IMPORT_APPROVAL_FAILED = 'import_approval_failed'
+IMPORT_ENDED = 'import_ended'
+IMPORT_RUN_LOCK_KEY = 'memory-import-runner'
 
 
 def direct_import_draft_filter(version, *, in_progress=False):
@@ -66,6 +69,8 @@ class ImportStore(DraftStore):
         kelivo = source == 'kelivo'
         if kelivo and self.schema_version < KELIVO_IMPORT_VERSION:
             raise ImportFormatError(f'请先升级记忆核心到版本 {KELIVO_IMPORT_VERSION}，再导入 Kelivo 备份')
+        if source == 'deepseek' and self.schema_version < DEEPSEEK_IMPORT_VERSION:
+            raise ImportFormatError(f'请先升级记忆核心到版本 {DEEPSEEK_IMPORT_VERSION}，再导入 DeepSeek 聊天记录')
         timestamp=format_timestamp(now,self.settings)
         with connect(self.dsn) as c:
             context=context_for(c,self.space_id)
@@ -146,7 +151,7 @@ class ImportStore(DraftStore):
 
     def _describe(self, c, job, *, now=None):
         counts=c.execute('''SELECT count(*) FILTER (WHERE selected) AS total,
-            count(*) FILTER (WHERE selected AND status IN ('completed','skipped')) AS processed,
+            count(*) FILTER (WHERE selected AND status IN ('completed','skipped') AND error_code IS DISTINCT FROM %s) AS processed,
             count(*) FILTER (WHERE status='skipped') AS skipped,
             count(*) FILTER (WHERE selected AND status='failed') AS failed,
             count(*) FILTER (WHERE selected AND status='running') AS running,
@@ -157,7 +162,7 @@ class ImportStore(DraftStore):
                 WHERE i.job_id=%s AND i.bot_id=%s AND i.selected
                   AND p.review_ready_at IS NOT NULL) AS structured_cards
             FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s''',
-            (job['id'],self.space_id,job['id'],self.space_id)).fetchone()
+            (IMPORT_ENDED,job['id'],self.space_id,job['id'],self.space_id)).fetchone()
         handled = counts['processed'] + counts['failed']
         remaining = counts['total'] - handled
         if job['status'] == 'running' and job.get('run_started_at') and remaining > 0:
@@ -227,6 +232,49 @@ class ImportStore(DraftStore):
             if job['status'] in ACTIVE:
                 job=self._pause(c,job,'import_stopped',format_timestamp(now,self.settings))
             return self._describe(c,job)
+
+    def _require_lifecycle(self):
+        if self.schema_version < IMPORT_LIFECYCLE_VERSION:
+            raise ValueError(f'放弃或结束导入需要先升级记忆核心到版本 {IMPORT_LIFECYCLE_VERSION}')
+
+    def discard(self, identifier):
+        self._require_lifecycle()
+        with connect(self.dsn) as c:
+            job = self._job(c, identifier, lock=True)
+            discarded = c.execute('SELECT memory_core.discard_import_preview(%s,%s) AS value',
+                (self.space_id, job['id'])).fetchone()['value']
+            if not discarded:
+                raise RevisionConflict('只有待确认的导入可以放弃')
+
+    def end(self, identifier, *, now):
+        self._require_lifecycle()
+        timestamp = format_timestamp(now, self.settings)
+        with connect(self.dsn) as c:
+            job = self._job(c, identifier, lock=True)
+            scope = (job['id'], self.space_id)
+            if job['status'] == 'completed' and job['error_code'] == IMPORT_ENDED:
+                return self._describe(c, job)
+            if job['status'] != 'failed':
+                raise RevisionConflict('只有已暂停的导入可以结束')
+            if c.execute("""SELECT 1 FROM memory_core.import_items
+                WHERE job_id=%s AND bot_id=%s AND status='running' LIMIT 1""", scope).fetchone():
+                # Stop lets in-flight work finish. A free runner lock means
+                # these rows survived an interrupted coordinator instead.
+                idle = c.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS value',
+                    (IMPORT_RUN_LOCK_KEY,)).fetchone()['value']
+                if not idle:
+                    raise RevisionConflict('还有正在处理的条目，请等它们收尾后再结束导入')
+                c.execute("""UPDATE memory_core.import_items SET status='pending'
+                    WHERE job_id=%s AND bot_id=%s AND status='running'""", scope)
+            released = c.execute('SELECT memory_core.release_unfinished_import_materials(%s,%s) AS value',
+                (self.space_id, job['id'])).fetchone()['value']
+            if not released:
+                raise RevisionConflict('还有草稿正在整理，请等它们收尾后再结束导入')
+            c.execute("""UPDATE memory_core.import_items SET status='skipped',error_code=%s,segments=NULL,updated_at=%s
+                WHERE job_id=%s AND bot_id=%s AND status IN ('pending','failed')""", (IMPORT_ENDED, timestamp, *scope))
+            job = c.execute("""UPDATE memory_core.import_jobs SET status='completed',error_code=%s,updated_at=%s
+                WHERE id=%s AND bot_id=%s RETURNING *""", (IMPORT_ENDED, timestamp, *scope)).fetchone()
+            return self._describe(c, job)
 
     def recover_running(self, identifier, *, now):
         """Called by the new runner before starting any workers for this job."""
@@ -395,4 +443,4 @@ class ImportStore(DraftStore):
 
 def import_run_lock(dsn):
     """One coordinator across processes; crash releases this session lock."""
-    return background_lock(dsn, 'memory-import-runner')
+    return background_lock(dsn, IMPORT_RUN_LOCK_KEY)

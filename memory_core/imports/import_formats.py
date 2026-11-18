@@ -12,7 +12,7 @@ from ..storage.clock import business_day_label, format_timestamp
 
 MAX_UPLOAD_BYTES = 90 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024 * 1024
-ImportSource = Literal["chatgpt", "claude", "gemini", "kelivo", "memory"]
+ImportSource = Literal["chatgpt", "claude", "gemini", "deepseek", "kelivo", "memory"]
 SOURCES = frozenset(get_args(ImportSource))
 
 

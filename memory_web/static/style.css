@@ -400,6 +400,7 @@ dialog p { margin-top: 12px; }
 .import-job-head strong { font-size: 13px; font-weight: 500; }
 .import-job progress { display: block; width: 100%; height: 5px; margin: 12px 0 8px; accent-color: var(--pink); }
 .import-job .meta { margin: 6px 0; overflow-wrap: anywhere; }
+#import-history > summary { padding: 12px 0; font-size: 13px; cursor: pointer; color: var(--focus); }
 
 .approval-schedule { font-size: 12px; margin: 8px 0 12px; line-height: 1.7; }
 #auto-approval-form .check { font-size: 13px; line-height: 1.7; }

@@ -1,7 +1,8 @@
 """Bounded JSON reads and disk grouping for official exports."""
 
 from datetime import datetime
-from contextlib import closing
+from collections import Counter
+from contextlib import closing, contextmanager
 from hashlib import sha256
 from io import BufferedReader, BytesIO, RawIOBase, TextIOWrapper
 import json
@@ -10,6 +11,7 @@ import re
 import sqlite3
 from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
+from zlib import error as ZipDataError
 
 import ijson
 
@@ -18,6 +20,7 @@ from .import_formats import (ImportDay, ImportFormatError, MAX_UPLOAD_BYTES,
     MAX_JSON_BYTES, SOURCES, _object, _identifier, _hash, _chatgpt, _claude,
     _split, _memory, _gemini)
 from .kelivo import kelivo_days
+from .deepseek import FORMAT_ERROR as DEEPSEEK_FORMAT_ERROR, indexed_session_id, session_days
 
 
 class JsonReader(RawIOBase):
@@ -52,6 +55,8 @@ def json_records(stream):
 def upload_limit_message(source):
     if source == 'kelivo':
         return '上传文件超过 90 MiB 上限，请在 Kelivo 只勾选要导入的类别后重新备份'
+    if source == 'deepseek':
+        return 'DeepSeek 导出 ZIP 超过 90 MiB 上限'
     return '上传文件超过 90 MiB 上限，请将 JSON 单独压成 ZIP 后上传'
 
 
@@ -92,8 +97,9 @@ def documents(source, uploads, max_json_bytes):
                     for member in sorted(archive.infolist(),key=lambda entry:entry.filename):
                         path = PurePosixPath(member.filename)
                         if source == 'gemini':
-                            selected = path.name.lower() == 'myactivity.json' and (
-                                'gemini' in str(path).lower() or len(path.parts)==1)
+                            # Takeout localizes the directories. _gemini
+                            # retains only the Gemini records by their header.
+                            selected = path.name.lower() == 'myactivity.json'
                         else:
                             pattern = r'conversations(?:-\d+)?\.json' if source=='chatgpt' else r'conversations\.json'
                             selected = re.fullmatch(pattern,path.name) is not None
@@ -109,11 +115,11 @@ def documents(source, uploads, max_json_bytes):
                             with BufferedReader(JsonReader(member_stream,budget)) as document:
                                 yield document
                     if not found:
-                        raise ImportFormatError('ZIP 内没有找到所选来源的 JSON，请只压缩聊天 JSON 文件')
+                        raise ImportFormatError('ZIP 内没有找到所选来源的聊天 JSON，请核对导出格式')
             except (BadZipFile,RuntimeError,NotImplementedError):
                 raise ImportFormatError('无法读取 ZIP，请使用未加密的聊天 JSON 压缩文件') from None
         else:
-            raise ImportFormatError('聊天记录只接受官方 JSON 或仅包含聊天 JSON 的 ZIP；Gemini 请在 Takeout 选择 JSON')
+            raise ImportFormatError('聊天记录只接受官方 JSON 或 ZIP 导出包。Gemini 请在 Takeout 选择 JSON')
 
 
 def gemini_days(documents, settings, temp_dir):
@@ -142,17 +148,72 @@ def gemini_days(documents, settings, temp_dir):
                 yield ImportDay('gemini',key,'Gemini 活动记录',day,f'import:gemini:{key}:{day}',segments)
 
 
+def _deepseek_object(document):
+    if document.peek(3).startswith(b'\xef\xbb\xbf'):
+        document.read(3)
+    values = ijson.items(document, '', use_float=True)
+    value = next(values, None)
+    if not isinstance(value, dict) or next(values, None) is not None:
+        raise ImportFormatError(DEEPSEEK_FORMAT_ERROR)
+    return value
+
+
+def deepseek_days(files, settings, max_json_bytes):
+    budget = dict(used=0, limit=max_json_bytes)
+    for filename, stream in files:
+        if PurePosixPath(filename).suffix.lower() != '.zip':
+            raise ImportFormatError('DeepSeek 聊天记录请上传完整的官方导出 ZIP')
+        try:
+            with ZipFile(stream) as archive:
+                counts = Counter(member.filename for member in archive.infolist())
+
+                @contextmanager
+                def document(name):
+                    if counts[name] != 1:
+                        raise ImportFormatError(DEEPSEEK_FORMAT_ERROR)
+                    member = archive.getinfo(name)
+                    if member.flag_bits & 1:
+                        raise ImportFormatError('请上传未加密的 DeepSeek 官方导出 ZIP')
+                    if budget['used'] + member.file_size > budget['limit']:
+                        raise ImportFormatError('解压后的 JSON 总量超过 1 GiB 上限')
+                    with archive.open(member) as raw, BufferedReader(JsonReader(raw, budget)) as bounded:
+                        yield bounded
+
+                # Only the manifest, index and indexed session JSON are opened.
+                # Account data and attachments are never read from the archive.
+                with document('manifest.json') as manifest:
+                    version = _deepseek_object(manifest).get('export_format_version')
+                    if type(version) is not int or version != 3:
+                        raise ImportFormatError('暂只支持 DeepSeek 官方导出格式版本 3，请核对压缩包中的 manifest.json')
+                seen = set()
+                with document('chat_session_index.json') as index:
+                    for record in json_records(index):
+                        key = indexed_session_id(record)
+                        if key in seen:
+                            raise ImportFormatError('DeepSeek 导出目录包含重复对话编号，请核对导出文件')
+                        seen.add(key)
+                        with document(f'chat_sessions/{key}.json') as session:
+                            yield from session_days(_deepseek_object(session), key, settings)
+        except (ijson.JSONError, UnicodeError, OverflowError, RecursionError):
+            raise ImportFormatError(DEEPSEEK_FORMAT_ERROR) from None
+        except (BadZipFile, EOFError, RuntimeError, NotImplementedError, ZipDataError):
+            raise ImportFormatError('无法读取 DeepSeek 导出 ZIP，请核对文件是否完整') from None
+
+
 def iter_upload(source, uploads, settings, *, max_bytes=MAX_UPLOAD_BYTES,
                 max_json_bytes=MAX_JSON_BYTES, temp_dir=None):
     """Stream (filename, seekable binary file) pairs into one material at a time."""
     if source not in SOURCES:
-        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini、Kelivo 导出或记忆文件')
+        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini、DeepSeek、Kelivo 导出或记忆文件')
     files = upload_files(source,uploads,max_bytes)
     seen = {}
 
     def items():
         if source == 'kelivo':
             yield from kelivo_days(files,settings,temp_dir)
+            return
+        if source == 'deepseek':
+            yield from deepseek_days(files,settings,max_json_bytes)
             return
         streams = documents(source,files,max_json_bytes)
         if source == 'gemini':

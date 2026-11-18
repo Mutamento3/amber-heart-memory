@@ -394,7 +394,7 @@ class AdminTests(DatabaseTestCase):
         self.assertEqual(self.write("/api/spaces/sample/participants", dict(body, ignored_terms=[])).status_code, 422)
         with connect(self.app) as connection:
             ignored = connection.execute("SELECT ignored_terms FROM memory_core.space_policies WHERE bot_id='sample'").fetchone()["ignored_terms"]
-        self.assertEqual(ignored, ["宝宝", "宝贝", "亲爱的", "老公", "老婆", "Daddy"])
+        self.assertEqual(ignored, ["宝宝", "宝贝", "亲爱的", "老公", "老婆"])
         general = self.write("/api/spaces/general/participants", dict(body, expected_revision=0, topic_template="general"))
         self.assertEqual(general.status_code, 400, general.text)
         self.config.configure(

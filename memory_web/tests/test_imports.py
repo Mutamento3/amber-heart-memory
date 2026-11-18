@@ -23,11 +23,13 @@ from memory_core.daily.daily_tasks import DailyTasks
 from memory_core.storage.db import background_lock, connect
 from memory_core.imports.imports import ImportStore
 from memory_core.cards.pending_approval import PendingApprovalStore
+from memory_core.cards.review import ReviewStore
 from memory_core.cards.review_policy import ApprovalSettings
 from memory_core.storage.install import install
 from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
+from memory_core.tests.test_deepseek_import import deepseek_session, deepseek_zip
 from memory_core.tests.test_import_formats import claude
 from memory_core.tests.test_kelivo_import import kelivo_backup
 from memory_web.app import create_app
@@ -167,6 +169,88 @@ class WebImportTests(DatabaseTestCase):
                 self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.'+table).fetchone()['n'],0,table)
         self.assertEqual(self.http.get('/imports').status_code,200)
 
+    def test_discard_preview_removes_job_items_and_staged_material(self):
+        response = self.upload()
+        self.assertEqual(response.status_code, 200, response.text)
+        identifier = response.json()['id']
+        endpoint = self.path + '/' + identifier
+        with connect(self.app) as c:
+            staged = c.execute('SELECT segments FROM memory_core.import_items WHERE job_id=%s', (identifier,)).fetchone()
+            self.assertTrue(staged['segments'])
+        blocked = self.http.post(endpoint + '/discard', headers={'Origin': ORIGIN, 'X-CSRF-Token': 'bad'}, json={})
+        self.assertEqual(blocked.status_code, 403)
+        discarded = self.post(endpoint + '/discard')
+        self.assertEqual(discarded.status_code, 200, discarded.text)
+        self.assertEqual(self.http.get(self.path).json()['jobs'], [])
+        self.assertEqual(self.responses.calls, [])
+        self.assertEqual(list(self.settings.password_file.parent.glob('.import-*')), [])
+        with connect(self.app) as c:
+            for table in ('import_jobs', 'import_items', 'source_materials'):
+                self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.' + table).fetchone()['n'], 0)
+
+        _, active = self.queue_memories('合成已确认待处理材料。')
+        self.assertEqual(self.post(active + '/discard').status_code, 409)
+        self.assertEqual(self.post(active + '/end').status_code, 409)
+        self.assertEqual(self.http.get(active).json()['status'], 'queued')
+
+    def test_end_preserves_approved_and_ready_cards_and_reupload_releases_unfinished(self):
+        materials = ('合成已收录材料。', '合成待审核材料。', '合成结构失败材料。', '合成尚未开始材料。')
+        identifier, endpoint = self.queue_memories(*materials)
+        store = ImportStore(self.app, 'one')
+        runner = self.application.state.imports
+        for _ in range(2):
+            item = store.prepare_next(identifier, now=runner.clock())
+            runner._process(store, item, lambda: None)
+
+        class Embedder:
+            def embed(self, text):
+                return [1, 0, 0]
+
+        first = store.list()[0]
+        approved = ReviewStore(self.app, 'one').approve(
+            first['id'], expected_version=first['version'], expected_policy_revision=first['policy_revision'],
+            request_key='synthetic-review', embedder=Embedder(), embedding_model='synthetic-import-embedding',
+        )
+        card_endpoint = f'/api/spaces/one/cards/{approved["memory_item_id"]}'
+        original = self.http.get(card_endpoint).json()
+        kept = store.list()
+        self.assertEqual([draft['status'] for draft in kept], ['approved', 'pending'])
+        self.server.hook = lambda path, body: (200, dict(choices=[dict(message=dict(content='{}'), finish_reason='stop')]))
+        unfinished = store.prepare_next(identifier, now=runner.clock())
+        runner._process(store, unfinished, lambda: None)
+        self.assertEqual(store.list()[-1]['status'], 'structure_failed')
+        self.assertEqual(self.post(endpoint + '/stop').json()['status'], 'failed')
+
+        response = self.post(endpoint + '/end')
+        self.assertEqual(response.status_code, 200, response.text)
+        ended = response.json()
+        self.assertEqual((ended['status'], ended['error_code']), ('completed', 'import_ended'))
+        progress = ended['progress']
+        self.assertEqual((progress['processed'], progress['total'], progress['failed'], progress['running'],
+                          progress['structured_cards']), (2, 4, 0, 0, 2))
+        self.assertEqual(self.post(endpoint + '/end').json(), ended)
+        self.assertEqual(self.post(endpoint + '/retry').json(), ended)
+        self.assertEqual(store.list(), kept)
+        self.assertEqual(self.http.get(card_endpoint).json(), original)
+        with connect(self.app) as c:
+            rows = c.execute("""SELECT status,segments,extraction_id FROM memory_core.import_items
+                WHERE job_id=%s ORDER BY ordinal""", (identifier,)).fetchall()
+            self.assertEqual(rows[-2:], [dict(status='skipped', segments=None, extraction_id=None)] * 2)
+            self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.source_materials').fetchone()['n'], 2)
+
+        data = '\n'.join(f'## 2025-03-{n:02d}\n{material}\n' for n, material in enumerate(materials, 1))
+        uploaded = self.upload('memory', data.encode(), 'memory.md')
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        reopened = self.path + '/' + uploaded.json()['id']
+        plan = self.post(reopened + '/preview').json()
+        self.assertEqual((plan['skipped_count'], plan['material_count']), (2, 2))
+        self.server.hook = self.responses.respond
+        self.responses.calls.clear()
+        self.assertEqual(self.post(reopened + '/confirm').json()['status'], 'queued')
+        self.drain()
+        self.assertCountEqual([value['content'] for _, value in self.responses.calls], materials[2:])
+        self.assertEqual(store.list()[:2], kept)
+
     def test_six_cards_wait_without_connections_and_import_reports_live_progress(self):
         response = self.upload()
         self.assertEqual(response.status_code, 200, response.text)
@@ -255,6 +339,47 @@ class WebImportTests(DatabaseTestCase):
             daily.result(timeout=12)
         progress = self.http.get(endpoint).json()['progress']
         self.assertEqual((progress['processed'], progress['structured_cards'], progress['failed']), (1, 5, 0))
+
+    def test_deepseek_selects_conversations_and_uses_shared_worker_and_dedup(self):
+        backup = deepseek_zip(deepseek_session(), deepseek_session("synthetic-second", "合成另一段对话"))
+        response = self.upload("deepseek", backup, "deepseek_data.zip")
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + "/" + response.json()["id"]
+        preview = self.post(endpoint + "/preview").json()
+        self.assertEqual((preview["material_count"], preview["message_count"]), (4, 10))
+        self.assertTrue(all(chat["selected"] for chat in preview["conversations"]))
+        chosen = next(chat["key"] for chat in preview["conversations"] if chat["title"] == "合成植物对话")
+        selection = {"selected_conversations": [chosen]}
+        self.assertEqual(self.post(endpoint + "/preview", selection).json()["material_count"], 2)
+        self.assertEqual(self.responses.calls, [])
+        self.assertEqual(self.post(endpoint + "/confirm", selection).status_code, 200)
+        self.drain()
+        result = self.http.get(endpoint).json()
+        self.assertEqual((result["status"], result["model_calls"]), ("completed", 4))
+        self.assertEqual((result["progress"]["processed"], result["progress"]["structured_cards"]), (2, 2))
+        with connect(self.app) as connection:
+            sources = connection.execute("""SELECT source_key,segments FROM memory_core.source_materials
+                ORDER BY business_date""").fetchall()
+        self.assertEqual(len(sources), 2)
+        self.assertTrue(all(row["source_key"].startswith(f"import:deepseek:{chosen}:") for row in sources))
+        self.assertEqual([[part["segment_id"] for part in row["segments"]] for row in sources],
+                         [["m-1", "m-3"], ["m-5", "m-7", "m-8"]])
+        again = self.upload("deepseek", backup, "deepseek_data.zip")
+        self.assertEqual(again.status_code, 200, again.text)
+        repeated = self.post(self.path + "/" + again.json()["id"] + "/preview", selection).json()
+        self.assertEqual((repeated["material_count"], repeated["skipped_count"]), (0, 2))
+
+    def test_deepseek_bad_archive_returns_clear_error_and_rolls_back(self):
+        response = self.upload("deepseek", deepseek_zip(version=1), "deepseek_data.zip")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("格式版本 3", response.json()["detail"])
+        broken = deepseek_session("synthetic-broken")
+        del broken["current_message_id"]
+        response = self.upload("deepseek", deepseek_zip(deepseek_session(), broken), "deepseek_data.zip")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("DeepSeek 导出格式不完整", response.json()["detail"])
+        self.assertEqual(self.http.get(self.path).json()["jobs"], [])
+        self.assertEqual(self.responses.calls, [])
 
     def test_kelivo_uses_date_selection_and_existing_worker_and_dedup(self):
         encrypted = self.upload('kelivo', b'KELIVENC' + bytes(64), 'backup.kbackup')

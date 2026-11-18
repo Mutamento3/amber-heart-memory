@@ -390,33 +390,13 @@ cd amber-heart-memory
 
 导入调用模型抽卡，会产生费用。预览页会显示天数和预计调用次数。默认同时处理 3 份材料，可通过 `MEMORY_IMPORT_CONCURRENCY` 调整，最小为 1。每次抽卡调用的默认超时是 600 秒（`MEMORY_EXTRACTION_TIMEOUT_SECONDS`），超时会自动再试一次。个别材料失败时其余照常处理，结束后可以只重试失败项。也可以先停止，稍后继续。
 
-**支持的来源：**
+**支持的来源**（点进去看各自的导出和导入步骤）：
 
-- **ChatGPT**：网页版 设置 → Data controls → Export data，邮件里下载压缩包，上传其中的 `conversations.json`（新版可能拆成好几个 `conversations-000.json` 等，一起上传）。
-- **Claude**：网页版 设置 → Privacy → Export data，上传其中的 `conversations.json`。
-- **Gemini**：聊天记录不在 Gemini 里导出，而在 Google Takeout：
-  1. 打开 https://takeout.google.com，点"取消全选"；
-  2. 勾选"**我的活动**"，点它下面的"包括所有活动记录数据"，在弹窗里先取消全选，再只勾 **Gemini Apps**；
-  3. 还是这一行，点"多种格式"，把"活动记录"从 HTML 改成 **JSON**；
-  4. 创建导出，等邮件，上传压缩包里的 `MyActivity.json`。
-- **Kelivo**：[备份并导入聊天和记忆](docs/import/kelivo.md)。
-- **你自己整理的记忆文件**：UTF-8 的 `.md` 或 `.txt`，每条以日期开头：
-
-  ```
-  ## 2025-03-14
-  小雨和阿言第一次一起去看海。出发前阿言说要在海边看日出，结果两人都睡过了头，赶到时太阳已经老高了。阿言说以后每年都要来，补上那次日出。
-
-  ## 2025-05-02
-  小雨和阿言吵了一架。那阵子小雨连着熬夜赶稿，阿言催她睡觉，她嫌烦，说了句气话就关了手机。第二天两人把话说开，约定生气不过夜。
-  ```
-
-  用名字来写，不要用"我""他"：正文会存进卡片，"我"在以后的召回里分不清是谁。设置里填的名字或又名都可以，示例里的小雨和阿言换成你们的名字。
-
-  模型会补上标题、摘要和主题。它会原样保留已经符合卡片成文要求的正文，或把零散、口语化的内容整理成完整的正文。卡片详情可展开查看留存的导入原文。可以让你的 AI 帮你把别处的记忆整理成这个格式。
-
-**选择范围**：ChatGPT 和 Claude 的导出会列出全部对话，默认全选，把和你们无关的（比如工作上的问答）取消勾选再开始。Gemini 的导出不分对话，按日期范围选。
-
-**大小限制**：上传的文件不超过 90 MB，解压后的聊天记录总量不超过 1 GB。**不要上传带图片的整个导出包**，只传里面的 JSON 文件；JSON 超过 90 MB 时，把它单独压缩成 zip 再上传（文字压缩率很高）。
+- [ChatGPT](docs/import/chatgpt.md)
+- [Claude](docs/import/claude.md)
+- [Gemini](docs/import/gemini.md)
+- [Kelivo](docs/import/kelivo.md)（聊天和记忆）
+- [你自己整理的记忆文件](docs/import/memory-file.md)
 
 ## 接入聊天 App
 

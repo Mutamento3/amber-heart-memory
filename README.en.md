@@ -392,33 +392,13 @@ In the admin web app, go to "Settings → Import" (设置 → 导入), click "Go
 
 Importing calls models to extract cards, which costs money. The preview page shows the number of days and the estimated number of calls. By default 3 pieces of material are processed at the same time; you can adjust this with `MEMORY_IMPORT_CONCURRENCY` (minimum 1). The default timeout for each card-extraction call is 600 seconds (`MEMORY_EXTRACTION_TIMEOUT_SECONDS`), and a timed-out call is retried once automatically. If individual pieces fail, the rest are processed as usual, and afterwards you can retry just the failed ones. You can also stop and continue later.
 
-**Supported sources:**
+**Supported sources** (see each guide for export and import steps):
 
-- **ChatGPT**: on the web, Settings → Data controls → Export data; download the archive from the email and upload the `conversations.json` inside (newer exports may be split into several files such as `conversations-000.json`; upload them together).
-- **Claude**: on the web, Settings → Privacy → Export data; upload the `conversations.json` inside.
-- **Gemini**: chat history isn't exported from Gemini itself but from Google Takeout:
-  1. Open https://takeout.google.com and click "Deselect all";
-  2. Check "**My Activity**", click "All activity data included" below it, deselect everything in the dialog, then check only **Gemini Apps**;
-  3. In the same row, click "Multiple formats" and change "Activity records" from HTML to **JSON**;
-  4. Create the export, wait for the email, and upload the `MyActivity.json` from the archive.
-- **Kelivo** — [Back up and import chats and memories](docs/import/kelivo.en.md).
-- **Memory files you organized yourself**: UTF-8 `.md` or `.txt`, each entry starting with a date:
-
-  ```
-  ## 2025-03-14
-  Xiaoyu and Ayan went to the seaside together for the first time. Before setting off, Ayan said they should watch the sunrise by the sea, but they both overslept, and by the time they got there the sun was already high. Ayan said they should come every year, to make up for that sunrise.
-
-  ## 2025-05-02
-  Xiaoyu and Ayan had a fight. Xiaoyu had been staying up late for days to meet a deadline; Ayan kept telling her to go to sleep, she found it annoying, said something hurtful in anger and turned off her phone. The next day they talked it through and agreed never to go to bed angry.
-  ```
-
-  Write with names, not "I" or "he": the text is stored in a card, and in later recall "I" can't tell who is who. Either the names or the nicknames from Settings will do; replace Xiaoyu and Ayan in the example with your own names.
-
-  The model adds a title, summary and topics. It keeps text that already meets the card writing standard as it is, or turns scattered, casual notes into complete card text. The card details can be expanded to see the original imported text that was kept. You can ask your AI to help you organize memories from elsewhere into this format.
-
-**Choosing what to import**: ChatGPT and Claude exports list all conversations, all selected by default; uncheck the ones unrelated to the two of you (such as work Q&A) before starting. Gemini exports aren't split into conversations, so you choose a date range instead.
-
-**Size limits**: an uploaded file can be at most 90 MB, and the uncompressed chat records at most 1 GB in total. **Don't upload the whole export archive with images**; upload only the JSON files inside; if a JSON file is over 90 MB, compress it alone into a zip and upload that (text compresses very well).
+- [ChatGPT](docs/import/chatgpt.en.md)
+- [Claude](docs/import/claude.en.md)
+- [Gemini](docs/import/gemini.en.md)
+- [Kelivo](docs/import/kelivo.en.md) (chats and memories)
+- [Memory files you organized yourself](docs/import/memory-file.en.md)
 
 ## Connecting a chat app
 

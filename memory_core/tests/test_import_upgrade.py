@@ -1,18 +1,20 @@
-"""Version 21 → 22 using the real installer, schema snapshot and application role."""
+"""Import schema upgrades using the real installer and application role."""
+
+from datetime import datetime, timezone
 
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
 from memory_core.cards.drafts import DraftStore
 from memory_core.storage.install import install, catalog_fingerprint
 from memory_core.imports.imports import ImportStore
-from memory_core.imports.import_formats import parse_upload
+from memory_core.imports.import_formats import ImportFormatError, parse_upload
 from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
+from memory_core.tests.test_kelivo_import import kelivo_backup
 
 
 class ImportUpgradeTests(DatabaseTestCase):
     def test_existing_import_keeps_review_mode_after_upgrade(self):
-        from datetime import datetime, timezone
         settings=Settings(3)
         install(self.owner,settings,target_version=22)
         SpaceConfiguration(self.owner).configure('one',Participant('合成读者'),Participant('合成助手'))
@@ -54,3 +56,22 @@ class ImportUpgradeTests(DatabaseTestCase):
         self.assertFalse(install(self.owner,Settings(3)))
         with connect(self.owner) as c:
             self.assertEqual(catalog_fingerprint(c),before)
+
+    def test_existing_import_survives_upgrade_that_enables_kelivo(self):
+        settings = Settings(3)
+        install(self.owner, settings, target_version=24)
+        SpaceConfiguration(self.owner).configure('one', Participant('合成读者'), Participant('合成助手'))
+        store = ImportStore(self.app, 'one')
+        now = datetime.now(timezone.utc)
+        old = store.create('memory', parse_upload('memory', [
+            ('sample.md', '## 2025-03-14\n合成旧材料。'.encode()),
+        ], settings), now=now)
+        items = parse_upload('kelivo', [('synthetic.zip', kelivo_backup())], settings)
+        with self.assertRaisesRegex(ImportFormatError, '版本 25'):
+            store.create('kelivo', items, now=now)
+
+        self.assertTrue(install(self.owner, settings))
+        upgraded = ImportStore(self.app, 'one')
+        self.assertEqual(upgraded.get(old['id'])['source'], 'memory')
+        new = upgraded.create('kelivo', items, now=now)
+        self.assertEqual(upgraded.preview(new['id'], date_end='2025-03-13')['material_count'], 1)

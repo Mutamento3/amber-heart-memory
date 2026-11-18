@@ -5,13 +5,15 @@ from datetime import date, datetime, timezone
 from hashlib import sha256
 from html.parser import HTMLParser
 import re
+from typing import Literal, get_args
 
 from ..storage.clock import business_day_label, format_timestamp
 
 
 MAX_UPLOAD_BYTES = 90 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024 * 1024
-SOURCES = frozenset(("chatgpt", "claude", "gemini", "memory"))
+ImportSource = Literal["chatgpt", "claude", "gemini", "kelivo", "memory"]
+SOURCES = frozenset(get_args(ImportSource))
 
 
 class ImportFormatError(ValueError):
@@ -29,10 +31,14 @@ class ImportDay:
     source: str
     conversation_key: str
     title: str
-    business_date: str
+    business_date: str | None
     source_key: str
     segments: list[dict] | None
     message_count: int | None = None
+    assistant_key: str | None = None
+    assistant_name: str | None = None
+    is_kelivo_memory: bool = False
+    memory_text: str | None = None
 
     def __post_init__(self):
         if self.message_count is None:
@@ -59,7 +65,9 @@ def _identifier(value):
 
 def _timestamp(value, settings):
     try:
-        if type(value) in (int, float):
+        if isinstance(value, datetime):
+            instant = value
+        elif type(value) in (int, float):
             instant = datetime.fromtimestamp(value, timezone.utc)
         elif isinstance(value, str):
             instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -198,14 +206,15 @@ def _gemini(records, settings):
             yield _segment("assistant", body, stamp, index * 2 + 1, settings)
 
 
-def _split(source, key, title, segments, settings):
+def _split(source, key, title, segments, settings, *, assistant_key=None, assistant_name=None):
     days = {}
     for segment in segments:
         label = business_day_label(datetime.fromisoformat(segment["timestamp"]), settings).isoformat()
         days.setdefault(label, []).append(segment)
     conversation_key = _hash(key)
     return [ImportDay(source, conversation_key, title, day,
-        f"import:{source}:{conversation_key}:{day}", messages)
+        f"import:{source}:{conversation_key}:{day}", messages,
+        assistant_key=assistant_key, assistant_name=assistant_name)
         for day, messages in sorted(days.items())]
 
 
@@ -254,4 +263,5 @@ def parse_upload(source, uploads, settings, *, max_bytes=MAX_UPLOAD_BYTES,
     """Explicit small-input convenience; production consumes iter_upload directly."""
     from .import_stream import iter_upload
     return sorted(iter_upload(source,uploads,settings,max_bytes=max_bytes,
-        max_json_bytes=max_json_bytes,temp_dir=temp_dir),key=lambda item:(item.business_date,item.conversation_key))
+        max_json_bytes=max_json_bytes,temp_dir=temp_dir),
+        key=lambda item:(item.business_date is None,item.business_date or "",item.conversation_key))

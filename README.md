@@ -399,6 +399,7 @@ cd amber-heart-memory
   2. 勾选"**我的活动**"，点它下面的"包括所有活动记录数据"，在弹窗里先取消全选，再只勾 **Gemini Apps**；
   3. 还是这一行，点"多种格式"，把"活动记录"从 HTML 改成 **JSON**；
   4. 创建导出，等邮件，上传压缩包里的 `MyActivity.json`。
+- **Kelivo**：[备份并导入聊天和记忆](docs/import/kelivo.md)。
 - **你自己整理的记忆文件**：UTF-8 的 `.md` 或 `.txt`，每条以日期开头：
 
   ```

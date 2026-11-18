@@ -388,6 +388,12 @@ dialog p { margin-top: 12px; }
 .import-conversation > span { min-width: 0; }
 .import-conversation strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .import-conversation .meta { display: block; margin-top: 4px; }
+.import-assistant-heading strong { font-weight: 650; }
+.import-assistant-group .import-conversation:not(:first-child) { padding-inline-start: 22px; }
+.import-memory-section { margin-top: 18px; }
+.import-memory-section .meta { line-height: 1.6; }
+.import-memory-entries summary { padding: 8px 0 8px 22px; font-size: 12px; cursor: pointer; }
+.import-memory-entries strong { white-space: pre-wrap; }
 .import-select-actions { display: flex; gap: 8px; }
 .import-job { padding: 16px 0; border-bottom: 1px solid var(--line); }
 .import-job-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }

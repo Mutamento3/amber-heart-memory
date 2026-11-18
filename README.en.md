@@ -401,6 +401,7 @@ Importing calls models to extract cards, which costs money. The preview page sho
   2. Check "**My Activity**", click "All activity data included" below it, deselect everything in the dialog, then check only **Gemini Apps**;
   3. In the same row, click "Multiple formats" and change "Activity records" from HTML to **JSON**;
   4. Create the export, wait for the email, and upload the `MyActivity.json` from the archive.
+- **Kelivo** — [Back up and import chats and memories](docs/import/kelivo.en.md).
 - **Memory files you organized yourself**: UTF-8 `.md` or `.txt`, each entry starting with a date:
 
   ```

@@ -1,18 +1,17 @@
 """Durable preview, provenance and progress; extraction stays in DraftStore."""
 
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
 from ..storage.clock import format_timestamp
-from ..storage.db import connect
+from ..storage.db import background_lock, connect
 from ..cards.drafts import DraftStore, ExtractionConfigurationChanged, MaterialExpired, context_digest, context_for
 from ..cards.extraction_contract import check_credentials, material_input
 from .import_formats import ImportDay, ImportFormatError, SOURCES
 from .import_preview import preview
-from ..storage.schema import IMPORT_APPROVAL_VERSION, IMPORT_PROGRESS_VERSION, IMPORT_VERSION
+from ..storage.schema import IMPORT_APPROVAL_VERSION, IMPORT_PROGRESS_VERSION, IMPORT_VERSION, KELIVO_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION
 from ..storage.space import RevisionConflict, read_policy
 
 ACTIVE = ('queued', 'running')
@@ -44,23 +43,29 @@ class ImportStore(DraftStore):
             raise ValueError('导入任务不存在或属于其他空间')
         return row
 
-    def _items(self, c, job):
-        return c.execute('SELECT conversation_key,title,business_date,source_key,message_count FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s ORDER BY ordinal',
+    def _items(self, c, job, *, include_memory_text=False):
+        kelivo_columns = ',assistant_key,assistant_name,is_kelivo_memory' if job['source'] == 'kelivo' else ''
+        if kelivo_columns and include_memory_text:
+            kelivo_columns += ",CASE WHEN is_kelivo_memory THEN segments->0->>'text' END AS memory_text"
+        return c.execute(f'''SELECT conversation_key,title,business_date,source_key,message_count{kelivo_columns}
+            FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s ORDER BY ordinal''',
             (job['id'],self.space_id)).fetchall()
 
     def _preview(self, c, rows, **selection):
-        items=[ImportDay(segments=None,**{key:row[key] for key in
-            ('source','conversation_key','title','business_date','source_key','message_count')}) for row in rows]
+        items=[ImportDay(segments=None,**row) for row in rows]
         imported=c.execute('SELECT source_key FROM memory_core.source_materials WHERE bot_id=%s AND source_key=ANY(%s)',
             (self.space_id,[item.source_key for item in items])).fetchall()
         policy=read_policy(c,self.space_id)
-        used=self.daily_candidate_counts(c,list({item.business_date for item in items}))
+        used=self.daily_candidate_counts(c,list({item.business_date for item in items if item.business_date is not None}))
         return preview(items,daily_limit=policy['daily_limit'],used_per_day=used,
             imported_keys=[row['source_key'] for row in imported],**selection)
 
     def create(self, source, items, *, now):
         if source not in SOURCES:
             raise ImportFormatError('导入来源与材料不符')
+        kelivo = source == 'kelivo'
+        if kelivo and self.schema_version < KELIVO_IMPORT_VERSION:
+            raise ImportFormatError(f'请先升级记忆核心到版本 {KELIVO_IMPORT_VERSION}，再导入 Kelivo 备份')
         timestamp=format_timestamp(now,self.settings)
         with connect(self.dsn) as c:
             context=context_for(c,self.space_id)
@@ -69,17 +74,24 @@ class ImportStore(DraftStore):
                 VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *''',
                 (uuid4(),self.space_id,source,context['policy_revision'],context_digest(context),timestamp,timestamp)).fetchone()
             with c.cursor() as cursor:
-                statement='''INSERT INTO memory_core.import_items
-                    (job_id,bot_id,ordinal,conversation_key,title,business_date,source_key,message_count,segments,created_at,updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'''
+                kelivo_columns = ',assistant_key,assistant_name,is_kelivo_memory' if kelivo else ''
+                kelivo_values = ',%s,%s,%s' if kelivo else ''
+                statement=f'''INSERT INTO memory_core.import_items
+                    (job_id,bot_id,ordinal,conversation_key,title,business_date,source_key,message_count,segments,created_at,updated_at{kelivo_columns})
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s{kelivo_values})'''
                 batch, size, total = [], 0, 0
                 for ordinal,item in enumerate(items):
-                    if item.source!=source:
+                    if item.source!=source or (item.is_kelivo_memory and not kelivo):
                         raise ImportFormatError('导入来源与材料不符')
-                    material_input(item.segments,self.settings,item.business_date)
+                    material_input(item.segments,self.settings,item.business_date,
+                                   allow_undated=kelivo and item.is_kelivo_memory and item.business_date is None)
                     check_credentials(item.title)
-                    batch.append((job['id'],self.space_id,ordinal,item.conversation_key,item.title,item.business_date,
-                        item.source_key,item.message_count,Jsonb(item.segments),timestamp,timestamp))
+                    row = (job['id'],self.space_id,ordinal,item.conversation_key,item.title,item.business_date,
+                        item.source_key,item.message_count,Jsonb(item.segments),timestamp,timestamp)
+                    if kelivo:
+                        check_credentials(item.assistant_name)
+                        row += (item.assistant_key,item.assistant_name,item.is_kelivo_memory)
+                    batch.append(row)
                     size += sum(len(segment['text'].encode('utf-8')) for segment in item.segments)
                     total += 1
                     if len(batch)>=64 or size>=1024*1024:
@@ -96,7 +108,8 @@ class ImportStore(DraftStore):
             job=self._job(c,identifier)
             if job['status']!='preview':
                 raise RevisionConflict('任务已确认，不能更改导入范围')
-            rows=[dict(row,source=job['source']) for row in self._items(c,job)]
+            initial = all(value is None for value in selection.values())
+            rows=[dict(row,source=job['source']) for row in self._items(c,job,include_memory_text=initial)]
             return self._preview(c,rows,**selection)
 
     def confirm(self, identifier, *, now, auto_approve=False, **selection):
@@ -138,8 +151,13 @@ class ImportStore(DraftStore):
             count(*) FILTER (WHERE selected AND status='failed') AS failed,
             count(*) FILTER (WHERE selected AND status='running') AS running,
             coalesce(sum(message_count) FILTER (WHERE selected),0) AS message_count,
-            count(DISTINCT business_date) FILTER (WHERE selected) AS day_count
-            FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s''',(job['id'],self.space_id)).fetchone()
+            count(DISTINCT business_date) FILTER (WHERE selected) AS day_count,
+            (SELECT count(*) FROM memory_core.import_items i JOIN memory_core.pending_memories p
+                ON (p.extraction_id,p.bot_id)=(i.extraction_id,i.bot_id)
+                WHERE i.job_id=%s AND i.bot_id=%s AND i.selected
+                  AND p.review_ready_at IS NOT NULL) AS structured_cards
+            FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s''',
+            (job['id'],self.space_id,job['id'],self.space_id)).fetchone()
         handled = counts['processed'] + counts['failed']
         remaining = counts['total'] - handled
         if job['status'] == 'running' and job.get('run_started_at') and remaining > 0:
@@ -234,8 +252,14 @@ class ImportStore(DraftStore):
                 return None
             # The job row serializes claims, stop/retry and completion. Only this
             # short transaction holds it, while extraction runs independently.
-            item=c.execute('''SELECT * FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s
-                AND selected AND status='pending' ORDER BY business_date,conversation_key,ordinal LIMIT 1 FOR UPDATE''',
+            available = '''
+                AND NOT EXISTS (SELECT 1 FROM memory_core.pending_memories p
+                    WHERE (p.extraction_id,p.bot_id)=(i.extraction_id,i.bot_id)
+                      AND p.status IN ('structure_pending','structure_failed')
+                      AND p.structure_claim_until::timestamptz > clock_timestamp())''' if self.schema_version >= STRUCTURE_CLAIM_VERSION else ''
+            item=c.execute('''SELECT i.* FROM memory_core.import_items i WHERE job_id=%s AND bot_id=%s
+                AND selected AND status='pending' ''' + available + '''
+                ORDER BY business_date,conversation_key,ordinal LIMIT 1 FOR UPDATE''',
                 (job['id'],self.space_id)).fetchone()
             if not item:
                 self._settle(c,job,timestamp)
@@ -278,7 +302,7 @@ class ImportStore(DraftStore):
         if item['segments'] is None:
             raise MaterialExpired('导入原材料已过期')
         request_key='request:'+item['source_key']
-        if job['source']=='memory':
+        if job['source']=='memory' or item.get('is_kelivo_memory'):
             return self.submit_memory(item['source_key'],request_key,
                 item['segments'][0]['text'],item['business_date'],connection=c)
         return self.submit(item['source_key'],request_key,item['segments'],
@@ -304,6 +328,11 @@ class ImportStore(DraftStore):
                 self._pause(c,job,error,timestamp)
             else:
                 self._settle(c,job,timestamp)
+
+    def defer_item(self, item, *, now):
+        with connect(self.dsn) as c:
+            self._job(c,item['job_id'],lock=True)
+            self._set_item_result(c,item,'pending',None,format_timestamp(now,self.settings),previous='running')
 
     def _set_item_result(self, c, item, status, error, timestamp, *, previous='pending'):
         c.execute('''UPDATE memory_core.import_items SET status=%s,error_code=%s,updated_at=%s
@@ -364,16 +393,6 @@ class ImportStore(DraftStore):
             return len(expired)+count
 
 
-@contextmanager
 def import_run_lock(dsn):
     """One coordinator across processes; crash releases this session lock."""
-    with connect(dsn) as c:
-        key='memory-import-runner'
-        locked=c.execute('SELECT pg_try_advisory_lock(hashtextextended(%s,0)) AS value',(key,)).fetchone()['value']
-        c.commit()
-        try:
-            yield c if locked else None
-        finally:
-            if locked and not c.closed:
-                c.execute('SELECT pg_advisory_unlock(hashtextextended(%s,0))',(key,))
-                c.commit()
+    return background_lock(dsn, 'memory-import-runner')

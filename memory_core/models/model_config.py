@@ -6,6 +6,9 @@ import os
 from urllib.parse import urlsplit
 
 
+DEFAULT_EXTRACTION_TIMEOUT_SECONDS = 600
+
+
 @dataclass(frozen=True)
 class ModelRole:
     model: str | None = None

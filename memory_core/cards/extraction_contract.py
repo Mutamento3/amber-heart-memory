@@ -107,7 +107,8 @@ def iso_date(value):
 
 
 def material_input(
-    segments, settings, explicit_business_date=None, *, message_business_dates=None
+    segments, settings, explicit_business_date=None, *, message_business_dates=None,
+    allow_undated=False,
 ):
     if not isinstance(segments, list) or not segments:
         raise ContractError('segments_required')
@@ -136,7 +137,7 @@ def material_input(
                 )
             except (ValueError, TypeError, KeyError):
                 raise ContractError('offset_timestamp_required') from None
-        elif explicit_business_date is None:
+        elif explicit_business_date is None and not allow_undated:
             raise ContractError('missing_time_requires_business_date')
         text(segment['text'], 'segment_text')
         result.append(dict(segment_id=sid, speaker=speaker, text=segment['text'], timestamp=stamp))
@@ -147,23 +148,26 @@ def material_input(
         raise ContractError("invalid_message_day_mapping")
     if explicit_business_date is not None:
         days.add(iso_date(explicit_business_date))
-    if len(days) != 1:
+    if len(days) != 1 and not (allow_undated and not days):
         raise ContractError('split_material_by_business_day')
     check_credentials(result)
-    return result, days.pop()
+    return result, next(iter(days), None)
 
 
 def evidence(value, segments):
-    if not isinstance(value, list) or not value:
-        raise ContractError('evidence_required')
-    source = {s['segment_id']: s['text'] for s in segments}
+    if not isinstance(value, list):
+        raise ContractError('evidence_array_required')
+    source_ids = {segment['segment_id'] for segment in segments}
+    retained = []
     for item in value:
+        sid = item.get('segment_id') if isinstance(item, dict) else None
+        if not isinstance(sid, str) or sid not in source_ids:
+            continue
+        # The segment anchors the message time. The quote is kept as returned.
         keys(item, ('segment_id', 'quote'), 'evidence')
         text(item['quote'], 'quote')
-        quote = item['quote']
-        sid = text(item['segment_id'], 'segment_id')
-        if sid not in source or quote not in source[sid]:
-            raise ContractError('evidence_not_in_source')
+        retained.append(item)
+    return retained
 
 
 def narrative(value, segments, *, edited=False):
@@ -174,7 +178,7 @@ def narrative(value, segments, *, edited=False):
     score = value['importance']
     if type(score) is not int or not (0 if edited else 1) <= score <= 10:
         raise ContractError('invalid_importance')
-    evidence(value['evidence'], segments)
+    result['evidence'] = evidence(result['evidence'], segments)
     check_credentials(result)
     return result
 

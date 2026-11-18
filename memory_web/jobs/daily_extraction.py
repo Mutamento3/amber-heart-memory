@@ -51,6 +51,7 @@ class DailyExtraction:
                 selector=self.model.stage("selection", record),
                 structurer=self.model.stage("structure", record),
                 clock=self.clock,
+                model_timeout=self.settings.extraction_timeout_seconds,
             )
         if outcome["status"] != "complete" and not terminal_drafts(outcome):
             code = (

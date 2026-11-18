@@ -10,7 +10,7 @@ from ..storage.clock import format_timestamp
 from ..conversations.conversation_material import dialogue_input
 from ..conversations.conversation_rounds import fingerprint
 from ..conversations.conversations import ConversationStore
-from ..storage.db import connect
+from ..storage.db import background_lock, connect
 from ..storage.schema import SUMMARY_VERSION
 from ..storage.space import read_policy
 from .summary_policy import SummarySettings, summary_batch
@@ -88,20 +88,8 @@ class SummaryStore(ConversationStore):
     @contextmanager
     def job_lock(self):
         """Session lock survives short commits but vanishes on worker death."""
-        key = "conversation-summary:" + self.space_id
-        with connect(self.dsn) as c:
-            locked = c.execute(
-                "SELECT pg_try_advisory_lock(hashtextextended(%s,0)) AS locked", (key,)
-            ).fetchone()["locked"]
-            c.commit()
-            try:
-                yield locked
-            finally:
-                if locked:
-                    c.execute(
-                        "SELECT pg_advisory_unlock(hashtextextended(%s,0))", (key,)
-                    )
-                    c.commit()
+        with background_lock(self.dsn, "conversation-summary:" + self.space_id) as guard:
+            yield guard is not None
 
     def _input(self, connection, turns, policy):
         return dialogue_input(connection, self.space_id, turns, policy, self.settings)

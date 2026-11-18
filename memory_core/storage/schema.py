@@ -1,6 +1,6 @@
 """Supported storage versions; migrations are ordered and immutable once applied."""
 
-LATEST_VERSION = 24
+LATEST_VERSION = 26
 GRAPH_VERSION = 3
 DRAFT_VERSION = 4
 REVIEW_VERSION = 5
@@ -23,6 +23,8 @@ CORE_MEMORY_VERSION = 21
 IMPORT_VERSION = 22
 IMPORT_APPROVAL_VERSION = 23
 IMPORT_PROGRESS_VERSION = 24
+KELIVO_IMPORT_VERSION = 25
+STRUCTURE_CLAIM_VERSION = 26
 SUPPORTED_VERSIONS = frozenset(range(1, LATEST_VERSION + 1))
 
 MIGRATION_FILES = {
@@ -49,4 +51,6 @@ MIGRATION_FILES = {
     22: "022_imports.sql",
     23: "023_import_approval.sql",
     24: "024_import_run_progress.sql",
+    25: "025_kelivo_import.sql",
+    26: "026_structure_claims.sql",
 }

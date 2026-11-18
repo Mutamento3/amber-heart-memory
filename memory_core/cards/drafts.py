@@ -1,22 +1,33 @@
 """Explicit material -> selection -> structure -> versioned review drafts."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
 import hashlib
 import json
 import re
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
+from uuid import uuid4
 
+from psycopg import Error
 from psycopg.types.json import Jsonb
 
 from ..storage.db import connect
 from ..storage.clock import format_timestamp
 from ..models.http_transport import ModelCallError
+from ..models.model_config import DEFAULT_EXTRACTION_TIMEOUT_SECONDS
 from .extraction_contract import (ContractError, CredentialContent, ENTITY_TYPES, ENTITY_SUBTYPES,
     RELATION_TYPES, check_credentials, identifier, material_input, narrative, render_prompt,
     selection_result, structure, json_object, text)
 from .graph_store import GraphStore
-from ..storage.schema import DRAFT_VERSION, TOPIC_DETAILS_VERSION, DELAYED_APPROVAL_VERSION, IMPORT_VERSION
+from ..storage.schema import DRAFT_VERSION, TOPIC_DETAILS_VERSION, DELAYED_APPROVAL_VERSION, IMPORT_VERSION, KELIVO_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION
 from ..storage.space import RevisionConflict, read_policy, read_topics
+
+
+MAX_CONCURRENT_STRUCTURES = 6
+
+_structure_pool = ThreadPoolExecutor(
+    max_workers=MAX_CONCURRENT_STRUCTURES, thread_name_prefix="memory-structure"
+)
 
 
 def context_for(connection, space_id):
@@ -73,7 +84,7 @@ class ExtractionConfigurationChanged(RevisionConflict):
 
 
 class StructureInProgress(RevisionConflict):
-    pass
+    code = 'structure_in_progress'
 
 
 def structure_error(error):
@@ -129,11 +140,15 @@ class DraftStore(GraphStore):
             raise ValueError('材料来源无效')
         if material_kind not in ('chat','memory') or (material_kind=='memory' and self.schema_version<IMPORT_VERSION):
             raise ValueError('材料类型无效或需要先升级到导入版本')
+        undated = material_kind == 'memory' and business_date is None
+        if undated and self.schema_version < KELIVO_IMPORT_VERSION:
+            raise ValueError('无日期记忆需要先升级到支持 Kelivo 导入的版本')
         segments, day = material_input(
             segments,
             self.settings,
             business_date,
             message_business_dates=message_business_dates,
+            allow_undated=undated,
         )
         check_credentials([source_key, request_key])
         digest = hashlib.sha256(json.dumps([day,source_kind,segments], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -152,11 +167,15 @@ class DraftStore(GraphStore):
                 if existing['request_key'] != request_key:
                     raise ValueError('同一来源已有抽取请求，请使用原请求标识重试')
                 return existing['id']
-            material = connection.execute('''INSERT INTO memory_core.source_materials
-                (bot_id,source_key,content_sha256,business_date,source_kind,segments)
-                VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''', (self.space_id,source_key,digest,day,source_kind,Jsonb(segments))).fetchone()
+            params = (self.space_id,source_key,digest,day,source_kind,Jsonb(segments))
+            columns = 'bot_id,source_key,content_sha256,business_date,source_kind,segments'
+            placeholders = '%s,%s,%s,%s,%s,%s'
             if material_kind == 'memory':
-                connection.execute("UPDATE memory_core.source_materials SET material_kind='memory' WHERE id=%s AND bot_id=%s", (material['id'],self.space_id))
+                columns += ',material_kind'
+                placeholders += ',%s'
+                params += (material_kind,)
+            material = connection.execute(f'''INSERT INTO memory_core.source_materials ({columns})
+                VALUES ({placeholders}) RETURNING id''', params).fetchone()
             return connection.execute('''INSERT INTO memory_core.material_extractions(bot_id,material_id,request_key,policy_revision)
                 VALUES (%s,%s,%s,%s) RETURNING id''', (self.space_id,material['id'],request_key,policy['revision'])).fetchone()['id']
 
@@ -192,16 +211,19 @@ class DraftStore(GraphStore):
         with connect(self.dsn) as connection:
             context = context_for(connection, self.space_id)
             draft = self._draft(connection, draft_id)
-            if context['policy_revision'] != draft['policy_revision']:
-                raise ExtractionConfigurationChanged('配置已改变，请先复核草稿')
             extraction=self._extraction(connection,draft['extraction_id'])
             source=self._source(connection,extraction['material_id'])
-            if source['deleted_at']:
-                raise MaterialExpired('原文已删除')
-            if source.get('material_kind')=='memory':
-                return render_prompt('memory_structure',context,
-                    dict(source_date=source['business_date'],content=source['segments'][0]['text']))
-            return render_prompt('structure', context, structure_input(draft['narrative'],draft['business_date'],source['segments'],self.settings))
+        return self._render_structure_prompt(draft, context, source)
+
+    def _render_structure_prompt(self, draft, context, source):
+        if context['policy_revision'] != draft['policy_revision']:
+            raise ExtractionConfigurationChanged('配置已改变，请先复核草稿')
+        if source['deleted_at']:
+            raise MaterialExpired('原文已删除')
+        if source.get('material_kind')=='memory':
+            return render_prompt('memory_structure',context,
+                dict(source_date=source['business_date'],content=source['segments'][0]['text']))
+        return render_prompt('structure', context, structure_input(draft['narrative'],draft['business_date'],source['segments'],self.settings))
 
     @staticmethod
     def _model_call(model, prompt, parse, *, retry_rate_limit=False):
@@ -220,13 +242,15 @@ class DraftStore(GraphStore):
                     or (retry_rate_limit and error.code.endswith('_http_429'))):
                     raise
 
-    def extract(self, extraction_id, *, selector, structurer, clock=None, retry_rate_limit=False):
+    def extract(self, extraction_id, *, selector, structurer, clock=None, retry_rate_limit=False,
+                model_timeout=DEFAULT_EXTRACTION_TIMEOUT_SECONDS):
         with connect(self.dsn) as connection:
             context = context_for(connection, self.space_id)
             extraction = self._extraction(connection, extraction_id)
             source = self._source(connection, extraction['material_id'])
         if extraction['status']=='complete':
             return self.extraction(extraction_id)
+        self._require_structure_claims()
         if source['deleted_at']:
             raise MaterialExpired('原文已删除')
         if extraction['policy_revision'] != context['policy_revision']:
@@ -263,9 +287,22 @@ class DraftStore(GraphStore):
                 reason = None if selected else (reason or ('daily_limit_reached' if not available else 'below_importance_threshold'))
                 connection.execute('''UPDATE memory_core.material_extractions SET status=%s,version=version+1,error_code=NULL,skipped_reason=%s,
                     updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s''', ('selected' if selected else 'complete',reason,extraction_id,self.space_id))
-        for draft in self.extraction(extraction_id)['drafts']:
-            if draft['status'] in ('structure_pending','structure_failed'):
-                self._structure(draft, structurer, clock=clock, retry_rate_limit=retry_rate_limit)
+        futures = [
+            _structure_pool.submit(self._structure, draft, structurer, clock=clock,
+                                   retry_rate_limit=retry_rate_limit, model_timeout=model_timeout)
+            for draft in self.extraction(extraction_id)['drafts']
+            if draft['status'] in ('structure_pending', 'structure_failed')
+        ]
+        try:
+            for future in as_completed(futures):
+                future.result()
+        except BaseException:
+            # Drain started writes before the caller can settle or retry a batch
+            # invalidated by a lost draft or changed configuration.
+            for future in futures:
+                future.cancel()
+            wait(futures)
+            raise
         self._settle_structure(extraction_id)
         return self.extraction(extraction_id)
 
@@ -277,6 +314,7 @@ class DraftStore(GraphStore):
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s''', ('selected' if unfinished else 'complete',extraction_id,self.space_id))
 
     def structure_retry_target(self, draft_id, *, expected_version):
+        self._require_structure_claims()
         with connect(self.dsn) as connection:
             draft = self._draft(connection, draft_id)
             if draft['version'] != expected_version or draft['status'] != 'structure_failed':
@@ -288,8 +326,9 @@ class DraftStore(GraphStore):
                 raise MaterialExpired('原文已删除')
             return draft
 
-    def restructure(self, draft, *, structurer, clock=None):
-        self._structure(draft, structurer, clock=clock)
+    def restructure(self, draft, *, structurer, clock=None, model_timeout=DEFAULT_EXTRACTION_TIMEOUT_SECONDS):
+        self._require_structure_claims()
+        _structure_pool.submit(self._structure, draft, structurer, clock=clock, model_timeout=model_timeout).result()
         self._settle_structure(draft['extraction_id'])
         return self.get(draft['id'])
 
@@ -313,28 +352,49 @@ class DraftStore(GraphStore):
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s AND version=%s''',
                 ('selection:'+type(error).__name__,previous['id'],self.space_id,previous['version']))
 
-    def _structure(self, draft, model, *, clock=None, retry_rate_limit=False):
-        # The session lock covers the model call without holding a database
-        # transaction open. A restart releases it and leaves the draft intact.
-        with connect(self.dsn) as guard:
-            locked = guard.execute('SELECT pg_try_advisory_lock(hashtextextended(%s,0)) AS locked',
-                (f'draft-structure:{self.space_id}:{draft["id"]}',)).fetchone()['locked']
-            guard.commit()
-            if not locked:
-                raise StructureInProgress('这张草稿正在整理')
-            current = self._draft(guard, draft['id'])
-            guard.commit()
-            if current['version'] != draft['version']:
-                raise RevisionConflict('草稿已被其他任务处理，请重新读取')
-            return self._run_structure(draft, model, clock=clock, retry_rate_limit=retry_rate_limit)
+    def _require_structure_claims(self):
+        if self.schema_version < STRUCTURE_CLAIM_VERSION:
+            raise ValueError('整理草稿需要先升级记忆核心到版本 26')
 
-    def _run_structure(self, draft, model, *, clock=None, retry_rate_limit=False):
+    def _claim_structure(self, draft, token, lease_seconds):
         with connect(self.dsn) as connection:
+            current = self._draft(connection, draft['id'], lock=True)
+            if current['version'] != draft['version'] or current['status'] not in ('structure_pending', 'structure_failed'):
+                raise RevisionConflict('草稿已被其他任务处理，请重新读取')
+            claimed = connection.execute('''UPDATE memory_core.pending_memories
+                SET structure_claim_token=%s,structure_claimed_at=memory_core.format_timestamp(statement_timestamp()),
+                    structure_claim_until=memory_core.format_timestamp(statement_timestamp() + %s * interval '1 second')
+                WHERE id=%s AND bot_id=%s
+                  AND (structure_claim_until IS NULL OR structure_claim_until::timestamptz<=clock_timestamp())
+                RETURNING id''', (token, lease_seconds, current['id'], self.space_id)).fetchone()
+            if not claimed:
+                raise StructureInProgress('这张草稿正在整理')
             context = context_for(connection, self.space_id)
-            extraction = self._extraction(connection,draft['extraction_id'])
-            source = self._source(connection,extraction['material_id'])
-        if context['policy_revision'] != draft['policy_revision']:
-            raise ExtractionConfigurationChanged('配置已改变，请先复核草稿')
+            extraction = self._extraction(connection, current['extraction_id'])
+            source = self._source(connection, extraction['material_id'])
+            prompt = self._render_structure_prompt(current, context, source)
+        return current, context, source, prompt
+
+    def _structure(self, draft, model, *, clock=None, retry_rate_limit=False,
+                   model_timeout=DEFAULT_EXTRACTION_TIMEOUT_SECONDS):
+        # The lease covers both attempts, plus the import's shared 429 cooldown.
+        # Do not change the review version until there is a result to publish.
+        token = uuid4()
+        lease_seconds = 2 * model_timeout + (180 if retry_rate_limit else 30)
+        current, context, source, prompt = self._claim_structure(draft, token, lease_seconds)
+        try:
+            result = self._structure_result(current, model, context, source, prompt, retry_rate_limit=retry_rate_limit)
+            self._save_structure(current, token, source, result, clock=clock)
+        except Exception:
+            # Release our claim promptly on conflicts. If the database is
+            # unreachable, expiry still allows recovery after a restart.
+            with suppress(Error), connect(self.dsn) as connection:
+                connection.execute('''UPDATE memory_core.pending_memories SET structure_claim_token=NULL,
+                    structure_claimed_at=NULL,structure_claim_until=NULL
+                    WHERE id=%s AND bot_id=%s AND structure_claim_token=%s''', (current['id'], self.space_id, token))
+            raise
+
+    def _structure_result(self, draft, model, context, source, prompt, *, retry_rate_limit):
         try:
             def parse(raw):
                 value=json_object(raw)
@@ -350,33 +410,33 @@ class DraftStore(GraphStore):
                         raise ContractError('memory_source_date_changed')
                     return dict(result,title=title,content=content)
                 return structure(value,context)
-            result = self._model_call(model, self.structure_prompt(draft['id']), parse,
+            result = self._model_call(model, prompt, parse,
                 retry_rate_limit=retry_rate_limit)
-            payload, status, error = {**draft['narrative'], **result}, 'pending', None
+            return {**draft['narrative'], **result}, 'pending', None
         except (MaterialExpired, RevisionConflict):
             raise
         except Exception as exc:
-            payload, status, error = None, 'structure_failed', structure_error(exc)
+            return None, 'structure_failed', structure_error(exc)
+
+    def _save_structure(self, draft, token, source, result, *, clock):
+        payload, status, error = result
+        first = dict(draft['narrative'])
+        if payload is not None and source.get('material_kind') == 'memory':
+            first['title'] = payload['title']
+        timestamp = format_timestamp(clock() if clock else datetime.now(timezone.utc), self.settings)
         with connect(self.dsn) as connection:
-            current = context_for(connection, self.space_id)
-            if current['policy_revision'] != context['policy_revision']:
+            if read_policy(connection, self.space_id)['revision'] != draft['policy_revision']:
                 raise ExtractionConfigurationChanged('模型返回时配置已改变')
-            extraction = self._extraction(connection,draft['extraction_id'])
-            source = self._source(connection,extraction['material_id'],lock=True)
-            if source['deleted_at']:
+            if self._source(connection, source['id'], lock=True)['deleted_at']:
                 raise MaterialExpired('原文已删除')
-            ready_clause=''
-            first=dict(draft['narrative'])
-            if payload is not None and source.get('material_kind')=='memory':
-                first['title']=payload['title']
-            values=[Jsonb(first),Jsonb(payload) if payload is not None else None,status,error]
-            if self.schema_version>=DELAYED_APPROVAL_VERSION:
-                timestamp=format_timestamp(clock() if clock else datetime.now(timezone.utc),self.settings)
-                ready_clause=",review_ready_at=CASE WHEN %s='pending' THEN coalesce(review_ready_at,%s) ELSE review_ready_at END"
-                values.extend([status,timestamp])
-            values.extend([draft['id'],self.space_id,draft['version']])
-            updated = connection.execute('''UPDATE memory_core.pending_memories SET narrative=%s,payload=%s,status=%s,error_code=%s,version=version+1'''+ready_clause+''',
-                updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s AND version=%s RETURNING id''',values).fetchone()
+            updated = connection.execute('''UPDATE memory_core.pending_memories
+                SET narrative=%s,payload=%s,status=%s,error_code=%s,version=version+1,
+                    structure_claim_token=NULL,structure_claimed_at=NULL,structure_claim_until=NULL,
+                    review_ready_at=CASE WHEN %s='pending' THEN coalesce(review_ready_at,%s) ELSE review_ready_at END,
+                    updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP)
+                WHERE id=%s AND bot_id=%s AND version=%s AND structure_claim_token=%s RETURNING id''',
+                (Jsonb(first), Jsonb(payload) if payload is not None else None, status, error, status, timestamp,
+                 draft['id'], self.space_id, draft['version'], token)).fetchone()
             if not updated:
                 raise RevisionConflict('草稿已被其他任务处理，请重新读取')
 
@@ -384,7 +444,8 @@ class DraftStore(GraphStore):
         with connect(self.dsn) as connection:
             connection.execute('''UPDATE memory_core.pending_memories SET error_code=%s,version=version+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP)
-                WHERE bot_id=%s AND id=%s AND version=%s AND status='structure_failed' ''',
+                WHERE bot_id=%s AND id=%s AND version=%s AND status='structure_failed'
+                  AND structure_claim_token IS NULL''',
                 (error,self.space_id,draft['id'],draft['version']))
 
     def extraction(self, extraction_id):

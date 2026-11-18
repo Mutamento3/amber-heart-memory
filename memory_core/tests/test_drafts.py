@@ -7,7 +7,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from threading import Barrier, Lock
 from unittest.mock import patch
+from uuid import uuid4
 
 import psycopg
 
@@ -153,17 +155,127 @@ class DraftTests(DatabaseTestCase):
         self.assertEqual(repaired['drafts'][0]['status'],'pending')
         self.assertEqual(len(good.calls),1)
 
-    def test_quoted_evidence_must_match_source_and_inputs_cannot_replace_placeholders(self):
+    def test_structures_cards_from_one_material_in_parallel_with_partial_failure(self):
         extraction = self.submit()
-        candidate = self.candidate(); candidate['evidence'][0]['quote']='invented sentence'
-        model = self.models(extraction,[candidate])
-        self.assertEqual(self.store.extract(extraction,selector=model,structurer=model)['status'],'failed')
+        candidates = [self.candidate(suffix=str(i)) for i in range(3)]
+        selector = self.models(extraction, candidates)
+        barrier = Barrier(3, timeout=8)
+        calls = {}
+        lock = Lock()
+        bad_title = candidates[1]['title']
+        success = json.dumps(self.graph())
+
+        class Structurer:
+            def extract(self, prompt):
+                title = json.loads(prompt.rsplit('\n', 2)[1])['title']
+                with lock:
+                    calls[title] = calls.get(title, 0) + 1
+                    first_call = calls[title] == 1
+                if first_call:
+                    barrier.wait()
+                return '{}' if title == bad_title else success
+
+        result = self.store.extract(extraction, selector=selector, structurer=Structurer())
+        self.assertEqual(result['status'], 'selected')
+        self.assertEqual([d['status'] for d in result['drafts']], ['pending', 'structure_failed', 'pending'])
+        self.assertEqual(calls, {candidates[0]['title']: 1, bad_title: 2, candidates[2]['title']: 1})
+        failed = result['drafts'][1]
+        retry = FixedModels({'extract': {self.store.structure_prompt(failed['id']): success}})
+        result = self.store.extract(extraction, selector=None, structurer=retry)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(len(retry.calls), 1)
+
+    def test_late_structure_does_not_overwrite_an_edit(self):
+        extraction = self.submit()
+        broken = self.models(extraction, graph={})
+        draft = self.store.extract(extraction, selector=broken, structurer=broken)['drafts'][0]
+        target = self.store.structure_retry_target(draft['id'], expected_version=draft['version'])
+        store = self.store
+        manual = {**self.candidate(), **self.graph(), 'summary': '合成人工编辑。'}
+        result = json.dumps(self.graph())
+
+        class ModelWithConcurrentEdit:
+            def extract(self, prompt):
+                store.edit(draft['id'], manual, expected_version=draft['version'],
+                           expected_policy_revision=draft['policy_revision'])
+                return result
+
+        with self.assertRaises(RevisionConflict):
+            store.restructure(target, structurer=ModelWithConcurrentEdit())
+        edited = store.get(draft['id'])
+        self.assertEqual(edited['version'], draft['version'] + 1)
+        self.assertEqual(edited['payload']['summary'], manual['summary'])
+        self.assertIsNone(edited['structure_claim_token'])
+
+    def test_expired_owner_cannot_write_or_clear_replacement_claim(self):
+        extraction = self.submit()
+        broken = self.models(extraction, graph={})
+        draft = self.store.extract(extraction, selector=broken, structurer=broken)['drafts'][0]
+        replacement = uuid4()
+        store, dsn = self.store, self.app
+        result = json.dumps(self.graph())
+
+        class ModelWithExpiredClaim:
+            def extract(self, prompt):
+                with connect(dsn) as connection:
+                    connection.execute("""UPDATE memory_core.pending_memories
+                        SET structure_claim_until=memory_core.format_timestamp(clock_timestamp() - interval '1 second')
+                        WHERE id=%s""", (draft['id'],))
+                store._claim_structure(draft, replacement, 60)
+                return result
+
+        with self.assertRaises(RevisionConflict):
+            store.restructure(draft, structurer=ModelWithExpiredClaim())
+        store.structure_retry_failed(draft, 'structure:unknown')
+        still_claimed = store.get(draft['id'])
+        self.assertEqual(still_claimed['structure_claim_token'], replacement)
+        self.assertEqual(still_claimed['version'], draft['version'])
+        self.assertEqual(still_claimed['error_code'], draft['error_code'])
+        shown = subprocess.run(
+            [sys.executable, '-m', 'memory_core.daily.workflow', '--space', 'example', 'show', str(draft['id'])],
+            env={'PATH': os.environ['PATH'], 'PYTHONDONTWRITEBYTECODE': '1', 'MEMORY_DSN': self.app},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)['version'], draft['version'])
+
+    def test_selection_preserves_quotes_and_drops_unknown_evidence_without_retry(self):
+        extraction = self.submit(body='Example User plans to study botany.\nShe picked a class.')
+        kept = dict(segment_id='s1', quote='plans to study botany. She picked a class.')
+        unknown = dict(segment_id='missing', quote='She picked a class.')
+        expected = [
+            dict(self.candidate(), evidence=[kept]),
+            dict(self.candidate(suffix=' without an anchor'), evidence=[]),
+            dict(self.candidate(suffix=' with no evidence returned'), evidence=[]),
+        ]
+        candidates = [
+            dict(expected[0], evidence=[kept, unknown]),
+            dict(expected[1], evidence=[unknown, dict(segment_id='missing'), dict(quote='No segment ID.')]),
+            expected[2],
+        ]
+        model = self.models(extraction, expected, graph=dict(self.graph(), source_date=None))
+        selection = self.store.selection_prompt(extraction)
+        model.fixtures['extract'][selection] = json.dumps(dict(memories=candidates, skipped_reason=None))
+        result = self.store.extract(extraction, selector=model, structurer=model)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(len(model.calls), 4)
+        for draft, candidate in zip(result['drafts'], expected, strict=True):
+            self.assertEqual(draft['payload']['evidence'], candidate['evidence'])
+            prompt = self.store.structure_prompt(draft['id'])
+            material = json.loads(prompt.rsplit('\n', 2)[1])
+            self.assertEqual([part['segment_id'] for part in material['evidence_times']],
+                             [part['segment_id'] for part in candidate['evidence']])
+            self.assertIsNone(draft['payload']['source_date'])
+
+    def test_inputs_cannot_replace_placeholders_or_lose_whitespace(self):
         prompt = render_prompt('selection',{'core_memory':''},{'text':'{{SPACE_CONTEXT_JSON}}'})
         self.assertIn('"text": "{{SPACE_CONTEXT_JSON}}"',prompt)
         segments, _ = material_input([dict(segment_id='s1',speaker='user',text='  original text \n',timestamp='2026-06-12T10:00:00+08:00')],Settings())
         self.assertEqual(segments[0]['text'],'  original text \n')
-        candidate=self.candidate(); candidate['evidence'][0]['quote']=' plans to study botany. '
-        with self.assertRaises(ContractError): selection_result(json.dumps(dict(memories=[candidate],skipped_reason=None)),[dict(segment_id='s1',text='Example User plans to study botany.')])
+        candidate = self.candidate()
+        candidate['evidence'][0]['quote'] = ' plans to study botany. '
+        result, _ = selection_result(json.dumps(dict(memories=[candidate], skipped_reason=None)), segments)
+        self.assertEqual(result[0]['evidence'], candidate['evidence'])
 
     def test_edit_reject_version_and_policy_conflicts_and_cross_space(self):
         draft = self.ready()

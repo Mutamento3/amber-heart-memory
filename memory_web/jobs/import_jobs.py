@@ -9,7 +9,7 @@ from time import monotonic, sleep
 
 from starlette.concurrency import run_in_threadpool
 
-from memory_core.cards.drafts import ExtractionConfigurationChanged, MaterialExpired
+from memory_core.cards.drafts import MAX_CONCURRENT_STRUCTURES, ExtractionConfigurationChanged, MaterialExpired, StructureInProgress
 from memory_core.models.http_transport import ModelCallError
 from memory_core.imports.imports import IMPORT_APPROVAL_FAILED, ImportStore, import_run_lock
 from memory_core.cards.review import ReviewStore
@@ -90,11 +90,11 @@ class ImportJobs:
             with ThreadPoolExecutor(max_workers=self.settings.import_concurrency) as pool:
                 workers = [pool.submit(self._work, store, job['id'], check_lock)
                            for _ in range(self.settings.import_concurrency)]
-                for worker in workers:
-                    worker.result()
-            return True
+                results = [worker.result() for worker in workers]
+            return any(results)
 
     def _work(self, store, identifier, check_lock):
+        worked = False
         while not self.stopping.is_set():
             check_lock()
             try:
@@ -103,15 +103,17 @@ class ImportJobs:
                 code = self._pause_code(error)
                 LOG.warning('import_paused space=%s job=%s code=%s', store.space_id, identifier, code)
                 store.fail_job(identifier, code, now=self.clock())
-                return
+                return True
             if item is None:
-                return
+                break
+            worked = True
             if item.get('skip'):
                 if item.get('error_code'):
                     LOG.warning('import_item_failed space=%s job=%s item=%s code=%s',
                         store.space_id, identifier, item['id'], item['error_code'])
                 continue
             self._process(store, item, check_lock)
+        return worked
 
     @staticmethod
     def _pause_code(error):
@@ -145,7 +147,9 @@ class ImportJobs:
                     value = stage.stage.extract(prompt)
                 except ModelCallError as error:
                     if error.code.endswith('_http_429'):
-                        self.backoff.limited(self.settings.import_concurrency)
+                        # One material can have several structure calls in
+                        # flight while the other workers are still selecting.
+                        self.backoff.limited(self.settings.import_concurrency + MAX_CONCURRENT_STRUCTURES - 1)
                     raise
                 self.backoff.succeeded(generation)
                 return value
@@ -158,11 +162,15 @@ class ImportJobs:
             result = store.extract(item['extraction_id'],
                 selector=GuardedStage(self.model.stage('selection', record)),
                 structurer=GuardedStage(self.model.stage('structure', record)),
-                clock=self.clock, retry_rate_limit=True)
+                clock=self.clock, retry_rate_limit=True, model_timeout=self.settings.extraction_timeout_seconds)
             if item['auto_approve']:
                 self._approve_drafts(store, result['drafts'], check_lock)
             if result['status'] != 'complete':
                 error_code = 'import_selection_failed' if result['status'] == 'failed' else 'import_structure_failed'
+        except StructureInProgress:
+            check_lock()
+            store.defer_item(item, now=self.clock())
+            return
         except Exception as error:
             error_code = self._pause_code(error) or 'import_' + step + '_failed'
             LOG.warning('import_item_failed space=%s job=%s item=%s step=%s type=%s code=%s',

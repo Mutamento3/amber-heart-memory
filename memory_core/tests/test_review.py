@@ -9,6 +9,7 @@ import tempfile
 from unittest.mock import patch
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
@@ -115,6 +116,14 @@ class ReviewTests(DatabaseTestCase):
             self.assertEqual(actual['version'],draft['version'])
             self.assertIsNone(actual['memory_item_id'])
         self.assertEqual(self.approve(draft)['status'],'approved')
+
+    def test_review_can_approve_after_edit_discards_all_evidence(self):
+        draft = self.ready(entities=False)
+        payload = dict(draft['payload'], evidence=[dict(segment_id='unknown', quote='Synthetic quote.')])
+        edited = self.store.edit(draft['id'], payload, expected_version=draft['version'],
+                                 expected_policy_revision=draft['policy_revision'])
+        self.assertEqual(edited['payload']['evidence'], [])
+        self.assertEqual(self.approve(edited)['status'], 'approved')
 
     def test_required_vector_failure_precedes_writes(self):
         draft=self.ready()
@@ -283,6 +292,7 @@ class ReviewTests(DatabaseTestCase):
             self.assertEqual(json.loads(results[0].stdout)['memory_item_id'],json.loads(results[1].stdout)['memory_item_id'])
 
     def test_v4_upgrade_and_failed_v5_rollback_preserve_pending_draft(self):
+        ready = self.ready(entities=False)
         with connect(self.owner) as connection: connection.execute('DROP SCHEMA memory_core CASCADE')
         install(self.owner,Settings(768),target_version=4)
         self.config.configure('example',Participant('Example User'),Participant('Example Assistant'))
@@ -292,7 +302,20 @@ class ReviewTests(DatabaseTestCase):
         self.store=store
         self.topic=store.topics()[0]['id']
         extraction=store.submit('v4','v4',[dict(segment_id='old',speaker='user',text='synthetic old input',timestamp='2026-06-12T10:00:00+08:00')])
-        old_draft=self.ready('v4-draft')
+        # The modern structurer requires its claim columns. Seed a ready
+        # draft in the historical layout to exercise the upgrade itself.
+        ready_extraction = store.submit('v4-draft', 'v4-draft', [
+            dict(segment_id='s1', speaker='user', text=ready['narrative']['content'],
+                 timestamp='2026-06-12T10:00:00+08:00'),
+        ])
+        with connect(self.app) as connection:
+            old_draft = connection.execute('''INSERT INTO memory_core.pending_memories
+                (bot_id,extraction_id,ordinal,business_date,policy_revision,narrative,payload,status)
+                VALUES ('example',%s,0,%s,1,%s,%s,'pending') RETURNING *''',
+                (ready_extraction, ready['business_date'], Jsonb(ready['narrative']),
+                 Jsonb(dict(ready['payload'], topic_ids=[self.topic])))).fetchone()
+            connection.execute("UPDATE memory_core.material_extractions SET status='complete' WHERE id=%s",
+                               (ready_extraction,))
         with tempfile.TemporaryDirectory() as folder:
             for source in MIGRATIONS.glob('*.sql'):
                 (Path(folder)/source.name).write_text(source.read_text()+('\nSELECT 1/0;' if source.name.startswith('005') else ''))

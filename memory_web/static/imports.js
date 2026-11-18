@@ -1,4 +1,6 @@
-const names = {chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", memory: "自己整理的记忆"};
+const names = {chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", kelivo: "Kelivo", memory: "自己整理的记忆"};
+const usesDateRange = source => source === "gemini" || source === "kelivo";
+const usesConversationSelection = source => ["chatgpt", "claude", "kelivo"].includes(source);
 const statuses = {preview: "待确认", queued: "排队中", running: "处理中", completed: "已完成", failed: "已暂停"};
 const MEMORY_SAMPLE = `## 2025-03-14
 小雨和阿言第一次一起去看海。出发前阿言说要在海边看日出，结果两人都睡过了头，赶到时太阳已经老高了。那天风很大，小雨的帽子被吹进海里，阿言笑了她一路，说以后每年都要来，补上那次日出。
@@ -29,7 +31,7 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     <label>从哪里搬来<select id="import-source" name="source">${Object.entries(names).map(([key, name]) => `<option value="${key}">${name}</option>`).join("")}</select></label>
     <div class="import-file-row"><button type="button" id="pick-import-file">选择文件</button><span id="import-file-name" class="muted">未选择文件</span><input id="import-file" type="file" accept=".json,.zip" hidden></div>
     <p id="import-help" class="meta"></p><div id="import-sample" class="import-sample" hidden><p class="meta">示例（把小雨和阿言换成你们的名字）：</p><pre></pre></div><button class="primary" id="upload-preview" type="submit">上传并预览</button>
-    <p class="meta">上传上限 ${Math.round(config.max_upload_bytes / 1024 / 1024)} MiB，解压后的 JSON 总量上限 ${config.max_json_bytes / 1024 / 1024 / 1024} GiB。确认后才会调用模型。</p>
+    <p class="meta">上传上限 ${Math.round(config.max_upload_bytes / 1024 / 1024)} MiB，解压后的聊天数据上限 ${config.max_json_bytes / 1024 / 1024 / 1024} GiB。确认后才会调用模型。</p>
     </fieldset></form><p id="import-error" class="error" role="alert"></p>
     ${config.configured ? "" : '<p class="meta">尚未配置抽卡模型，可以先上传预览。</p>'}
     <section id="import-preview" class="import-preview" hidden></section>
@@ -37,11 +39,12 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   const showError = (error) => { if (live()) $("#import-error").textContent = error.message; };
   const help = () => {
     const source = $("#import-source").value;
-    $("#import-file").accept = source === "memory" ? ".md,.txt" : ".json,.zip";
+    $("#import-file").accept = ({memory: ".md,.txt", kelivo: ".zip,.kbackup"})[source] || ".json,.zip";
     $("#import-help").textContent = ({
       chatgpt: "只上传 conversations.json 或 conversations-000.json 等分片，不要上传带图片的整个导出包。JSON 超过 90 MiB 时，把聊天 JSON 单独压成 ZIP 再传。只读取最终选定的聊天分支。",
       claude: "只上传官方导出的 conversations.json；超过 90 MiB 时把这个 JSON 单独压成 ZIP，不要上传带附件的整个导出包。",
       gemini: "在 Google Takeout 的 My Activity → Gemini Apps 选择 JSON 格式。只上传 MyActivity.json，超过 90 MiB 时单独压成 ZIP。不要上传整个导出包；日期范围内的普通聊天和 Gem 聊天都会导入。",
+      kelivo: "在 Kelivo 选择「聊天记录」和「助手」。想导入记忆时再选「记忆」。上传未加密的 ZIP。接入 Amber Heart 之后的聊天已经记录过了，导入时把结束日期选在接入之前。",
       memory: "每条以 ## 日期 开头，下面写正文，可以写多行；支持 .md 和 .txt 文件。用名字来写，不要用“我”“他”，设置里填的名字或又名都可以。写得越具体，整理出来的卡片越有用。也可以把下面的示例发给你的 AI，让它照这个格式帮你整理。",
     })[source];
     $("#import-sample").hidden = source !== "memory";
@@ -58,16 +61,77 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   $("#import-source").onchange = () => { $("#import-file").value = ""; showFileName(); help(); };
 
   function selection() {
-    if (plan.source === "gemini") return {
+    const filters = usesDateRange(plan.source) && plan.first_date ? {
       date_start: $("#import-start").value || null,
       date_end: $("#import-end").value || null,
-    };
-    if (plan.source === "memory") return {};
-    return {selected_conversations: $$("[data-import-conversation]:checked").map(input => input.value)};
+    } : {};
+    if (usesConversationSelection(plan.source)) {
+      filters.selected_conversations = $$("[data-import-conversation]:checked").map(input => input.value);
+    }
+    if (plan.source === "kelivo") {
+      filters.selected_memories = $$("[data-import-memory]:checked").map(input => input.value);
+    }
+    return filters;
+  }
+  function conversationChoice(item) {
+    const dates = item.first_date === item.last_date ? esc(item.first_date)
+      : `${esc(item.first_date)} 至 ${esc(item.last_date)}`;
+    return `<label class="import-conversation">
+      <input type="checkbox" data-import-conversation value="${esc(item.key)}" ${item.selected ? "checked" : ""}>
+      <span><strong>${esc(item.title)}</strong><span class="meta">${dates} · ${item.message_count} 条消息${item.imported_day_count ? ` · 已导过 ${item.imported_day_count} 天` : ""}</span></span>
+    </label>`;
+  }
+  function conversationChoices() {
+    if (plan.source === "kelivo") {
+      if (!plan.assistant_groups.length) return "";
+      return `<p class="meta">勾选要导入的助手或对话，可以同时选多个助手。</p>${assistantChoices(plan.assistant_groups, "conversations")}`;
+    }
+    if (!usesConversationSelection(plan.source)) return "";
+    return `<div class="import-select-actions"><button type="button" class="quiet" id="select-all-imports">全选</button><button type="button" class="quiet" id="select-no-imports">取消全选</button></div>
+      <div class="import-conversations">${plan.conversations.map(conversationChoice).join("")}</div>`;
+  }
+  function memoryChoice(item) {
+    const date = item.source_date ? esc(item.source_date) : "日期未注明";
+    return `<label class="import-conversation">
+      <input type="checkbox" data-import-memory value="${esc(item.key)}" ${item.selected ? "checked" : ""}>
+      <span><strong>${esc(item.text ?? item.title)}</strong><span class="meta">${date}${item.imported ? " · 已导过" : ""}</span></span>
+    </label>`;
+  }
+  function assistantChoices(groups, kind) {
+    const memories = kind === "memories";
+    const markup = groups.map((group, index) => {
+      const items = group[kind];
+      const examples = group.sample_titles.length
+        ? `<span class="meta">${group.sample_titles.map(esc).join(" · ")}</span>` : "";
+      const label = `import-assistant-${kind}-${index}`;
+      const choices = items.map(memories ? memoryChoice : conversationChoice).join("");
+      return `<div class="import-assistant-group" role="group" aria-labelledby="${label}" data-import-assistant-group>
+        <label class="import-conversation import-assistant-heading">
+          <input type="checkbox" data-import-assistant>
+          <span><strong id="${label}">${esc(group.name)} · ${items.length} ${memories ? "条记忆" : "个对话"}</strong>${examples}</span>
+        </label>
+        ${memories ? `<details class="import-memory-entries"><summary>查看条目</summary>${choices}</details>` : choices}
+      </div>`;
+    });
+    return `<div class="import-conversations">${markup.join("")}</div>`;
+  }
+  function memoryChoices() {
+    if (plan.source !== "kelivo" || !plan.memory_groups.length) return "";
+    const count = plan.memory_groups.reduce((total, group) => total + group.memories.length, 0);
+    return `<section class="import-memory-section"><div class="panelhead"><h3>Kelivo 记忆 ${count} 条</h3></div>
+      <p class="meta">聊天还在的话导聊天就够了，聊天删掉的可以用记忆补回来。</p>
+      ${plan.memory_groups.some(group => group.name === "全局记忆") ? '<p class="meta">全局记忆可能涉及多个助手，可以展开后按条挑选。</p>' : ""}
+      ${assistantChoices(plan.memory_groups, "memories")}
+    </section>`;
   }
   function counts() {
     const calls = plan.model_calls_min === plan.model_calls_max ? `${plan.model_calls_max}` : `${plan.model_calls_min}～${plan.model_calls_max}`;
-    $("#import-counts").innerHTML = `<span><strong>${plan.day_count}</strong> 天</span><span><strong>${plan.source === "memory" ? plan.memory_count : plan.message_count}</strong> ${plan.source === "memory" ? "条记忆" : "条消息"}</span><span><strong>${calls}</strong> 次模型调用</span>`;
+    const showChat = plan.source !== "memory" && (plan.source !== "kelivo" || plan.first_date);
+    const showMemory = plan.source === "memory" || (plan.source === "kelivo" && plan.memory_groups.length);
+    $("#import-counts").innerHTML = `${plan.source !== "kelivo" || showChat ? `<span><strong>${plan.day_count}</strong> 天</span>` : ""}
+      ${showChat ? `<span><strong>${plan.message_count}</strong> 条消息</span>` : ""}
+      ${showMemory ? `<span><strong>${plan.memory_count}</strong> 条记忆</span>` : ""}
+      <span><strong>${calls}</strong> 次模型调用</span>`;
     $("#import-skip").textContent = plan.skipped_count ? `${plan.skipped_count} 份原材料已经导过，将跳过。` : "";
     $("#confirm-import").disabled = !config.configured || !plan.material_count;
   }
@@ -88,14 +152,35 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     current = identifier;
     plan = next;
     state.dirty = true;
-    const choices = plan.source === "gemini"
+    const range = usesDateRange(plan.source) && plan.first_date
       ? `<div class="import-range"><label>从哪天<input type="date" id="import-start" value="${esc(plan.first_date)}" min="${esc(plan.first_date)}" max="${esc(plan.last_date)}"></label><label>到哪天<input type="date" id="import-end" value="${esc(plan.last_date)}" min="${esc(plan.first_date)}" max="${esc(plan.last_date)}"></label></div>`
-      : plan.source === "memory" ? "" : `<div class="import-select-actions"><button type="button" class="quiet" id="select-all-imports">全选</button><button type="button" class="quiet" id="select-no-imports">取消全选</button></div><div class="import-conversations">${plan.conversations.map(item => `<label class="import-conversation"><input type="checkbox" data-import-conversation value="${esc(item.key)}" checked><span><strong>${esc(item.title)}</strong><span class="meta">${esc(item.first_date)}${item.first_date === item.last_date ? "" : ` 至 ${esc(item.last_date)}`} · ${item.message_count} 条消息${item.imported_day_count ? ` · 已导过 ${item.imported_day_count} 天` : ""}</span></span></label>`).join("")}</div>`;
+      : "";
+    const choices = range + conversationChoices() + memoryChoices();
+    const modelInfo = plan.source === "memory" || (plan.source === "kelivo" && !plan.first_date)
+      ? "每条记忆调用一次整理。"
+      : plan.source === "kelivo" && plan.memory_groups.length
+        ? "聊天先挑选再整理成卡，每条记忆直接整理一次。"
+        : "先挑选，再按结果整理成卡，调用次数显示预计范围。";
     const panel = $("#import-preview");
     panel.hidden = false;
-    panel.innerHTML = `<div class="panelhead"><h2>${names[plan.source]} · 导入预览</h2></div>${choices}<div id="import-counts" class="import-counts"></div><p id="import-skip" class="meta"></p><p class="meta">${plan.source === "memory" ? "每条记忆调用一次整理。" : "先挑选，再按结果整理成卡，调用次数显示预计范围。"}格式错误等重试可能增加调用，最多按上述上限的两倍计算。不补写日记。</p>${config.auto_approve_supported ? '<label class="check"><input type="checkbox" id="import-auto-approve" checked>整理好后直接收录，不进待审核</label>' : ""}<div class="actions"><button type="button" class="primary" id="confirm-import">确认导入</button><button type="button" class="quiet" id="close-import-preview">收起预览</button></div><p class="meta">确认后会在后台处理。收录或整理失败的草稿留在待审核。原聊天不会混入你的当天聊天历史或摘要。</p>`;
+    panel.innerHTML = `<div class="panelhead"><h2>${names[plan.source]} · 导入预览</h2></div>${choices}<div id="import-counts" class="import-counts"></div><p id="import-skip" class="meta"></p><p class="meta">${modelInfo}格式错误等重试可能增加调用，最多按上述上限的两倍计算。不补写日记。</p>${config.auto_approve_supported ? '<label class="check"><input type="checkbox" id="import-auto-approve" checked>整理好后直接收录，不进待审核</label>' : ""}<div class="actions"><button type="button" class="primary" id="confirm-import">确认导入</button><button type="button" class="quiet" id="close-import-preview">收起预览</button></div><p class="meta">确认后会在后台处理。收录或整理失败的草稿留在待审核。原聊天不会混入你的当天聊天历史或摘要。</p>`;
     counts();
     $$("[data-import-conversation], #import-start, #import-end").forEach(input => input.onchange = recalculate);
+    for (const group of $$("[data-import-assistant-group]")) {
+      const toggle = group.querySelector("[data-import-assistant]");
+      const choices = [...group.querySelectorAll("[data-import-conversation], [data-import-memory]")];
+      const syncToggle = () => {
+        toggle.checked = choices.every(input => input.checked);
+        toggle.indeterminate = !toggle.checked && choices.some(input => input.checked);
+      };
+      syncToggle();
+      toggle.onchange = () => {
+        choices.forEach(input => input.checked = toggle.checked);
+        syncToggle();
+        recalculate();
+      };
+      choices.forEach(input => input.onchange = () => { syncToggle(); recalculate(); });
+    }
     for (const [id, checked] of [["select-all-imports", true], ["select-no-imports", false]]) {
       const button = $("#" + id);
       if (button) button.onclick = () => { $$("[data-import-conversation]").forEach(input => input.checked = checked); recalculate(); };
@@ -130,14 +215,14 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
         else if (seconds < 60) estimate = "预计还需不到 1 分钟";
         else estimate = `预计还需约 ${Math.round(seconds / 60)} 分钟`;
       }
-      const currentItem = job.current ? `<p class="meta">${job.current.status === "failed" ? "失败条目 · " : ""}${esc(job.current.business_date)} · ${esc(job.current.title)}</p>` : "";
+      const currentItem = job.current ? `<p class="meta">${job.current.status === "failed" ? "失败条目 · " : ""}${esc(job.current.business_date || "日期未注明")} · ${esc(job.current.title)}</p>` : "";
       const paused = job.status === "failed";
       const stopped = job.error_code === "import_stopped";
       const action = active(job) ? "stop" : (paused || incomplete) ? "retry" : null;
       const actionLabel = active(job) ? "停止" : incomplete ? `重试失败的 ${p.failed} 条` : stopped ? "继续" : "继续处理";
       return `<article class="import-job" data-import-job="${esc(job.id)}">
         <div class="import-job-head"><strong>${names[job.source]}</strong><span class="meta">${esc(job.created_at.slice(0, 16).replace("T", " "))} · ${label}</span></div>
-        ${job.status === "preview" ? '<p class="meta">等待选择范围并确认。</p>' : `<progress max="${Math.max(1, p.total)}" value="${handled}" aria-label="导入进度"></progress><p class="meta">已处理 ${handled} / ${p.total} 份原材料 · 失败 ${p.failed} 条 · 跳过 ${p.skipped} 份 · 已调用模型 ${job.model_calls} 次</p>`}
+        ${job.status === "preview" ? '<p class="meta">等待选择范围并确认。</p>' : `<progress max="${Math.max(1, p.total)}" value="${handled}" aria-label="导入进度"></progress><p class="meta">已处理 ${handled} / ${p.total} 份原材料 · 已整理 ${p.structured_cards ?? 0} 张卡 · 失败 ${p.failed} 条 · 已调用模型 ${job.model_calls} 次</p>`}
         ${estimate ? `<p class="meta import-estimate">${estimate}</p>` : ""}
         ${currentItem}
         ${paused ? `<p class="${stopped ? "meta" : "error"}">${errors[job.error_code] || "这份原材料未处理完，可以重试。已完成的部分会保留。"}</p>` : ""}
@@ -182,12 +267,18 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     event.preventDefault();
     const file = $("#import-file").files[0];
     if (!file) return showError(new Error("请先选择文件。"));
-    if (file.size > config.max_upload_bytes) return showError(new Error("文件超过 90 MiB，请只把聊天 JSON 文件压成 ZIP 后再上传，不要加入图片或其他附件。"));
+    const source = $("#import-source").value;
+    if (file.size > config.max_upload_bytes) {
+      const message = source === "kelivo"
+        ? "文件超过 90 MiB，请在 Kelivo 只勾选要导入的类别后重新备份。"
+        : "文件超过 90 MiB，请只把聊天 JSON 文件压成 ZIP 后再上传，不要加入图片或其他附件。";
+      return showError(new Error(message));
+    }
     $("#import-error").textContent = "";
     $("#import-upload fieldset").disabled = true;
     $("#upload-preview").textContent = "正在读取文件…";
     try {
-      const query = new URLSearchParams({source: $("#import-source").value, filename: file.name});
+      const query = new URLSearchParams({source, filename: file.name});
       const job = await api(url(`/imports/upload?${query}`), {method: "POST", file});
       if (!live()) return;
       await openPreview(job.id);

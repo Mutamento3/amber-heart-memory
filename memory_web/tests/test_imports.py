@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
@@ -15,7 +16,11 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from memory_core.storage.config import Settings
-from memory_core.storage.db import connect
+from memory_core.storage.clock import business_day_bounds
+from memory_core.conversations.conversations import ConversationStore
+from memory_core.conversations.chat_text import render_memories
+from memory_core.daily.daily_tasks import DailyTasks
+from memory_core.storage.db import background_lock, connect
 from memory_core.imports.imports import ImportStore
 from memory_core.cards.pending_approval import PendingApprovalStore
 from memory_core.cards.review_policy import ApprovalSettings
@@ -24,9 +29,11 @@ from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_import_formats import claude
+from memory_core.tests.test_kelivo_import import kelivo_backup
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.jobs.daily_jobs import DailyJobs
+from memory_web.jobs.daily_extraction import DailyExtraction
 from memory_web.jobs.import_jobs import ImportBackoff, ImportJobs
 from memory_web.install import install_web
 from memory_web.admin.password import write_password
@@ -160,6 +167,211 @@ class WebImportTests(DatabaseTestCase):
                 self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.'+table).fetchone()['n'],0,table)
         self.assertEqual(self.http.get('/imports').status_code,200)
 
+    def test_six_cards_wait_without_connections_and_import_reports_live_progress(self):
+        response = self.upload()
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + '/' + response.json()['id']
+        self.assertEqual(self.post(endpoint + '/confirm').status_code, 200)
+        self.responses.candidate_count = 5
+        runner = self.application.state.imports
+        core = Settings(3)
+        now = datetime.now(timezone.utc)
+        daily_day = (now.date() - timedelta(days=2))
+        instant = business_day_bounds(daily_day, core)[0] + timedelta(hours=1)
+        store = ConversationStore(self.app, 'two')
+        record = store.begin(dict(model='synthetic', messages=[
+            dict(role='user', content='合成原话：今天复习植物。'),
+        ]), {'operation': 'new'}, now=instant)
+        store.finish(record, content='合成回应', finish_reason='stop', now=instant)
+        tasks = DailyTasks(self.app, 'two')
+
+        release = Event()
+        import_blocked = Event()
+        six_blocked = Event()
+        locks = Lock()
+        import_waiting = 0
+        calls_waiting = 0
+
+        def gate(stage, material):
+            nonlocal import_waiting, calls_waiting
+            if stage != 'structure':
+                return
+            nightly = material['business_date'] == daily_day.isoformat()
+            if not nightly and material['title'] != '合成第二张':
+                return
+            with locks:
+                calls_waiting += 1
+                if not nightly:
+                    import_waiting += 1
+                    if import_waiting == 4:
+                        import_blocked.set()
+                if calls_waiting == 6:
+                    six_blocked.set()
+            if not release.wait(30):
+                raise AssertionError('test did not release blocked model calls')
+
+        self.responses.hook = gate
+
+        def run_daily():
+            with tasks.run_lock() as acquired:
+                self.assertTrue(acquired)
+                task = tasks.claim('extraction', daily_day.isoformat(), now=now)
+                asyncio.run(DailyExtraction(self.settings, runner.model, lambda: now)(task, None, tasks, now))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            importing = pool.submit(runner.run_once)
+            try:
+                self.assertTrue(import_blocked.wait(8))
+                daily = pool.submit(run_daily)
+                self.assertTrue(six_blocked.wait(8))
+                # The first draft has finished while the others still wait.
+                for _ in range(60):
+                    response = self.http.get(endpoint)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    progress = response.json()['progress']
+                    if progress['structured_cards'] == 1:
+                        break
+                    sleep(.05)
+                self.assertEqual((progress['total'], progress['processed'], progress['structured_cards']), (1, 0, 1))
+                with background_lock(self.app, 'synthetic-other-scheduler') as guard:
+                    self.assertIsNotNone(guard)
+                    sessions_sql = """SELECT count(*) AS total,
+                        count(*) FILTER (WHERE state='idle in transaction') AS idle_transactions
+                        FROM pg_stat_activity WHERE datname=current_database()
+                          AND backend_type='client backend'"""
+                    with connect(self.app) as probe:
+                        self.assertEqual(probe.execute(sessions_sql).fetchone(), {'total': 4, 'idle_transactions': 0})
+                        claims = probe.execute('''SELECT count(*) AS total FROM memory_core.pending_memories
+                            WHERE structure_claim_token IS NOT NULL''').fetchone()['total']
+                        self.assertEqual(claims, 6)
+                    with ExitStack() as short_queries:
+                        first = short_queries.enter_context(connect(self.app))
+                        for _ in range(4):
+                            short_queries.enter_context(connect(self.app))
+                        self.assertEqual(first.execute(sessions_sql).fetchone(), {'total': 8, 'idle_transactions': 0})
+            finally:
+                release.set()
+            self.assertTrue(importing.result(timeout=12))
+            daily.result(timeout=12)
+        progress = self.http.get(endpoint).json()['progress']
+        self.assertEqual((progress['processed'], progress['structured_cards'], progress['failed']), (1, 5, 0))
+
+    def test_kelivo_uses_date_selection_and_existing_worker_and_dedup(self):
+        encrypted = self.upload('kelivo', b'KELIVENC' + bytes(64), 'backup.kbackup')
+        self.assertEqual(encrypted.status_code, 400)
+        self.assertIn('请关闭备份加密后重新备份', encrypted.json()['detail'])
+        self.assertEqual(self.http.get(self.path).json()['jobs'], [])
+
+        backup = kelivo_backup()
+        response = self.upload('kelivo', backup, 'backup.zip')
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + '/' + response.json()['id']
+        selection = {'date_end': '2025-03-13'}
+        plan = self.post(endpoint + '/preview', selection).json()
+        self.assertEqual((plan['source'], plan['day_count'], plan['message_count']), ('kelivo', 1, 2))
+        self.assertEqual(self.responses.calls, [])
+
+        self.assertEqual(self.post(endpoint + '/confirm', selection).json()['status'], 'queued')
+        self.drain()
+        job = self.http.get(endpoint).json()
+        self.assertEqual((job['status'], job['progress']['processed'], job['model_calls']), ('completed', 1, 2))
+        stage, material = self.responses.calls[0]
+        self.assertEqual(stage, 'selection')
+        self.assertEqual([segment['text'] for segment in material['segments']], [
+            '合成原话：一起学陶艺。', '合成选中回复。',
+        ])
+
+        second = self.upload('kelivo', backup, 'renamed.zip').json()
+        repeated = self.post(self.path + '/' + second['id'] + '/preview', selection).json()
+        self.assertEqual((repeated['material_count'], repeated['skipped_count']), (0, 1))
+
+    def test_kelivo_imports_only_conversations_in_selected_assistant_group(self):
+        backup = kelivo_backup(multiple_assistants=True)
+        response = self.upload('kelivo', backup, 'assistants.zip')
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + '/' + response.json()['id']
+        plan = self.post(endpoint + '/preview').json()
+        groups = {group['name']: group['conversations'] for group in plan['assistant_groups']}
+        self.assertEqual(set(groups), {'陶艺助手', '写作助手', '未归属'})
+        self.assertEqual(plan['material_count'], 0)
+        self.assertNotIn('合成助手配置', json.dumps(plan, ensure_ascii=False))
+        chosen = groups['陶艺助手']
+        self.assertEqual({item['title'] for item in chosen}, {'合成对话', '合成茶杯记录'})
+        selection = {'date_end': '2025-03-13', 'selected_conversations': [item['key'] for item in chosen]}
+        filtered = self.post(endpoint + '/preview', selection).json()
+        self.assertEqual((filtered['material_count'], filtered['message_count']), (2, 3))
+        self.assertEqual(self.post(endpoint + '/confirm', selection).json()['status'], 'queued')
+        self.drain()
+        job = self.http.get(endpoint).json()
+        self.assertEqual((job['status'], job['progress']['processed']), ('completed', 2))
+        selected_text = [segment['text'] for stage, material in self.responses.calls if stage == 'selection'
+                         for segment in material['segments']]
+        self.assertCountEqual(selected_text, ['合成原话：一起学陶艺。', '合成选中回复。', '合成原话：我做了一只茶杯。'])
+
+    def test_kelivo_memory_uses_one_card_per_entry_and_stable_dedup(self):
+        class Embedder:
+            def embed(self, text):
+                return [1, 0, 0]
+
+        runner = self.application.state.imports
+        runner.embedder = Embedder()
+        runner.embedding_model = 'synthetic-import-embedding'
+        backup = kelivo_backup(multiple_assistants=True, with_memories=True)
+        response = self.upload('kelivo', backup, 'memories.zip')
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + '/' + response.json()['id']
+        initial = self.post(endpoint + '/preview').json()
+        groups = {group['name']: group['memories'] for group in initial['memory_groups']}
+        self.assertGreater(len(groups['全局记忆'][0]['text']), len(groups['全局记忆'][0]['title']))
+        keys = [groups[name][0]['key'] for name in ('陶艺助手', '写作助手')]
+        selection = {'selected_memories': keys, 'selected_conversations': [], 'date_end': '2025-03-13'}
+        plan = self.post(endpoint + '/preview', selection).json()
+        self.assertEqual((plan['memory_count'], plan['message_count'], plan['model_calls_max']), (2, 0, 2))
+        self.assertEqual(self.post(endpoint + '/confirm', dict(selection, auto_approve=True)).json()['status'], 'queued')
+        self.drain()
+        job = self.http.get(endpoint).json()
+        self.assertEqual((job['progress']['processed'], job['progress']['failed'], job['model_calls']), (2, 0, 2))
+        self.assertCountEqual(self.responses.calls, [
+            ('structure', {'content': '合成陶艺记忆。', 'source_date': '2025-03-14'}),
+            ('structure', {'content': '合成旧记忆。', 'source_date': None}),
+        ])
+        with connect(self.app) as c:
+            cards = c.execute('SELECT title,content,source_date FROM memory_core.memory_items').fetchall()
+        self.assertCountEqual([(card['content'], card['source_date']) for card in cards], [
+            ('合成陶艺记忆。', '2025-03-14'), ('合成旧记忆。', None),
+        ])
+        undated = next(card for card in cards if card['source_date'] is None)
+        self.assertIn('日期：未注明', render_memories([dict(undated, number=1)], '合成读者'))
+
+        revised = kelivo_backup(multiple_assistants=True, with_memories=True, revised=True)
+        repeated = self.upload('kelivo', revised, 'revised.zip')
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        plan = self.post(self.path + '/' + repeated.json()['id'] + '/preview', selection).json()
+        self.assertEqual((plan['memory_count'], plan['skipped_count'], plan['model_calls_max']), (0, 2, 0))
+
+    def test_undated_kelivo_memory_rejects_a_date_invented_by_model(self):
+        def respond(path, body):
+            code, value = self.responses.respond(path, body)
+            message = value['choices'][0]['message']
+            message['content'] = json.dumps(dict(json.loads(message['content']), source_date='2025-03-14'))
+            return code, value
+
+        self.server.hook = respond
+        backup = kelivo_backup(multiple_assistants=True, with_memories=True)
+        upload = self.upload('kelivo', backup, 'memories.zip')
+        self.assertEqual(upload.status_code, 200, upload.text)
+        endpoint = self.path + '/' + upload.json()['id']
+        plan = self.post(endpoint + '/preview').json()
+        old = next(entry for group in plan['memory_groups'] for entry in group['memories']
+                   if entry['source_date'] is None)
+        self.post(endpoint + '/confirm', {'selected_memories': [old['key']], 'selected_conversations': []})
+        self.drain()
+        self.assertEqual(self.http.get(endpoint).json()['progress']['failed'], 1)
+        draft = ImportStore(self.app, 'one').list()[0]
+        self.assertEqual(draft['error_code'], 'structure:format')
+        self.assertIsNone(draft['business_date'])
+        self.assertIsNone(draft['payload'])
+
     def test_progress_estimate_measures_only_the_current_import_run(self):
         clock = [datetime(2026, 4, 1, tzinfo=timezone.utc)]
         self.application.state.imports.clock = lambda: clock[0]
@@ -250,6 +462,7 @@ class WebImportTests(DatabaseTestCase):
         self.drain()
         result=self.http.get(endpoint).json()
         self.assertEqual((result['status'],result['model_calls']),('completed',1))
+        self.assertEqual(result['progress']['structured_cards'],1)
         self.assertNotIn('usage',result)
         with connect(self.app) as c:
             usage=c.execute('SELECT usage FROM memory_core.import_jobs WHERE id=%s',(response.json()['id'],)).fetchone()['usage']
@@ -267,10 +480,13 @@ class WebImportTests(DatabaseTestCase):
         self.drain()
         failed=self.http.get(endpoint).json()
         self.assertEqual((failed['status'],failed['progress']['failed']),('completed',1))
+        self.assertEqual(failed['progress']['structured_cards'],0)
         self.post(endpoint+'/retry')
         self.application.state.imports=ImportJobs(self.settings)
         self.drain()
-        self.assertEqual(self.http.get(endpoint).json()['status'],'completed')
+        retried=self.http.get(endpoint).json()
+        self.assertEqual(retried['status'],'completed')
+        self.assertEqual(retried['progress']['structured_cards'],1)
         self.assertEqual([stage for stage,_ in self.responses.calls],['selection','structure','structure'])
 
     def test_direct_import_uses_review_pipeline_and_exposes_retained_original(self):
@@ -453,19 +669,43 @@ class WebImportTests(DatabaseTestCase):
         model=self.application.state.imports.model
         record=lambda event: store.record_usage(identifier,event,now=now)
         store.extract(first['extraction_id'],selector=None,structurer=model.stage('structure',record))
+
+        class ProcessExited(BaseException):
+            pass
+
+        class InterruptedModel:
+            def extract(self, prompt):
+                raise ProcessExited()
+
+        with self.assertRaises(ProcessExited):
+            store.extract(second['extraction_id'], selector=None, structurer=InterruptedModel())
+        orphan = store.extraction(second['extraction_id'])['drafts'][0]
+        self.assertIsNotNone(orphan['structure_claim_token'])
         self.assertEqual(store.get(identifier)['progress']['running'],2)
+
         async def recover():
             runner=ImportJobs(self.settings)
             await self.real_import_start(runner)
             try:
-                async def finished():
-                    while store.get(identifier)['status']!='completed':
+                async def wait_for_progress(processed):
+                    while store.get(identifier)['progress']['processed'] != processed:
                         await asyncio.sleep(.02)
-                await asyncio.wait_for(finished(),timeout=8)
+                # The restarted runner continues the other materials while
+                # the orphaned draft still has a live claim.
+                await asyncio.wait_for(wait_for_progress(2),timeout=8)
+                self.assertEqual(store.get(identifier)['progress']['failed'],0)
+                still_claimed = store.extraction(second['extraction_id'])['drafts'][0]
+                self.assertEqual(still_claimed['structure_claim_token'], orphan['structure_claim_token'])
+                with connect(self.app) as connection:
+                    connection.execute("""UPDATE memory_core.pending_memories
+                        SET structure_claim_until=memory_core.format_timestamp(clock_timestamp() - interval '1 second')
+                        WHERE id=%s""", (orphan['id'],))
+                await asyncio.wait_for(wait_for_progress(3),timeout=8)
             finally:
                 await runner.stop()
         asyncio.run(recover())
         result=self.http.get(endpoint).json()
         self.assertEqual((result['progress']['processed'],result['model_calls']),(3,3))
+        self.assertIsNone(store.extraction(second['extraction_id'])['drafts'][0]['structure_claim_token'])
         self.assertCountEqual([material['content'] for _,material in self.responses.calls],
             ['合成已经整理材料。','合成崩溃在途材料。','合成剩余排队材料。'])

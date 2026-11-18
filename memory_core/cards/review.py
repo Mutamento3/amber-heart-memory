@@ -131,8 +131,8 @@ class ReviewStore(DraftStore):
             source=self._source(connection,extraction['material_id'])
             if source['deleted_at']:
                 raise ValueError('原文已删除，不能首次确认收录')
-            first={k:draft['payload'][k] for k in ('title','content','summary','importance','evidence')}
-            narrative(first,source['segments'],edited=True)
+            first=narrative({k:draft['payload'][k] for k in ('title','content','summary','importance','evidence')},
+                source['segments'],edited=True)
             second=structure({k:v for k,v in draft['payload'].items() if k not in ('title','content','importance','evidence')},context)
             payload={**first,**second}
         if embedder is None:

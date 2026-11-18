@@ -6,7 +6,7 @@ from datetime import timedelta
 from psycopg.types.json import Jsonb
 
 from ..storage.clock import format_timestamp
-from ..storage.db import connect
+from ..storage.db import background_lock, connect
 from ..storage.postgres import PostgresStore
 from ..storage.schema import DIARY_VERSION
 
@@ -65,20 +65,8 @@ class DailyTasks(PostgresStore):
 
     @contextmanager
     def run_lock(self):
-        with connect(self.dsn) as c:
-            key = "conversation-daily:" + self.space_id
-            acquired = c.execute(
-                "SELECT pg_try_advisory_lock(hashtextextended(%s,0)) AS locked", (key,)
-            ).fetchone()["locked"]
-            c.commit()
-            try:
-                yield acquired
-            finally:
-                if acquired:
-                    c.execute(
-                        "SELECT pg_advisory_unlock(hashtextextended(%s,0))", (key,)
-                    )
-                    c.commit()
+        with background_lock(self.dsn, "conversation-daily:" + self.space_id) as guard:
+            yield guard is not None
 
     def claim(self, kind, day, *, now):
         """Caller owns run_lock; attempt fencing rejects late, disconnected workers."""

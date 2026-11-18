@@ -1,5 +1,5 @@
 import {coreMemoryPage, memosPage} from "./memos.js?v=39";
-import {importsPage} from "./imports.js?v=67";
+import {importsPage} from "./imports.js?v=72";
 import {readPersonaFile} from "./persona-file.js?v=1";
 
 const basePath = new URL(import.meta.url).pathname.replace(
@@ -1267,7 +1267,7 @@ function lines(value) {
     .filter(Boolean);
 }
 function participantsForm(config, initialize) {
-  return `<form id="participants-form"><div class="people">${["user", "assistant"].map((role) => `<section class="person"><h3>${role === "user" ? "你" : "TA"}</h3>${field("名字", role + "_name", config?.participants[role].name || "", "text", `required maxlength="200" placeholder="${role === "user" ? "例：林小满" : "例：顾言"}"`)}<label>又名（如小名）<input name="${role}_aliases" type="text" maxlength="1000" placeholder="${role === "user" ? "例：满满、小满" : "例：阿言、言言"}" value="${esc(config?.participants[role].aliases.join("、") || "")}"></label></section>`).join("")}</div><p class="muted">可以填多个，用顿号隔开。聊天里出现这些名字时，记忆系统会知道说的是同一个人。想让 TA 怎么称呼你，请写在人设或核心记忆里。</p>${initialize ? `<label>记忆主题模板（创建后固定）<select name="topic_template"><option value="lover">恋人（默认）</option><option value="general">通用</option></select></label><p class="muted" id="template-preview"></p>` : ""}<p class="error" role="alert"></p><div class="actions"><button class="primary">${initialize ? "创建空间" : "保存参与者"}</button></div></form>`;
+  return `<form id="participants-form"><div class="people">${["user", "assistant"].map((role) => `<section class="person"><h3>${role === "user" ? "你" : "TA"}</h3>${field("名字", role + "_name", config?.participants[role].name || "", "text", `required maxlength="200" placeholder="${role === "user" ? "例：林小满" : "例：顾言"}"`)}<label>又名（如小名）<input name="${role}_aliases" type="text" maxlength="1000" placeholder="${role === "user" ? "例：满满、小满" : "例：阿言、言言"}" value="${esc(config?.participants[role].aliases.join("、") || "")}"></label></section>`).join("")}</div><p class="muted">又名可以空着，也可以填多个，用顿号隔开。聊天里出现这些名字时，记忆系统会知道说的是同一个人。想让 TA 怎么称呼你，请写在人设或核心记忆里。</p>${initialize ? `<label>记忆主题模板（创建后固定）<select name="topic_template"><option value="lover">恋人（默认）</option><option value="general">通用</option></select></label><p class="muted" id="template-preview"></p>` : ""}<p class="error" role="alert"></p><div class="actions"><button class="primary">${initialize ? "创建空间" : "保存参与者"}</button></div></form>`;
 }
 function wireParticipants(form, config, initialize, writeConfig = (write) => write()) {
   track(form);
@@ -1349,6 +1349,8 @@ async function finishInitialize() {
   clearPageCache();
   state.space = "default";
   sessionStorage.setItem("memory-space", state.space);
+  // 重装后空间编号仍是 default，清掉旧空间留下的"开始使用"已完成标记。
+  try { localStorage.removeItem(`amber-onboarding-done:${state.space}`); } catch { /* ignore */ }
   state.dirty = false;
   message("空间已创建，可以开始使用");
   await navigate("overview", false);

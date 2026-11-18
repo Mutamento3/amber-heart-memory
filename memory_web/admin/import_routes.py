@@ -3,15 +3,15 @@
 from contextlib import asynccontextmanager
 import re
 from tempfile import TemporaryFile, TemporaryDirectory
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
 from starlette.concurrency import run_in_threadpool
 
-from memory_core.imports.import_formats import MAX_UPLOAD_BYTES, MAX_JSON_BYTES
-from memory_core.imports.import_stream import iter_upload
+from memory_core.imports.import_formats import MAX_UPLOAD_BYTES, MAX_JSON_BYTES, ImportSource
+from memory_core.imports.import_stream import iter_upload, upload_limit_message
 from memory_core.imports.imports import ImportStore
 from memory_core.storage.schema import IMPORT_APPROVAL_VERSION
 from ..jobs.import_jobs import ImportJobs
@@ -24,6 +24,7 @@ def is_import_upload(request):
 class ImportSelection(BaseModel):
     model_config=ConfigDict(extra='forbid')
     selected_conversations: list[StrictStr] | None = None
+    selected_memories: list[StrictStr] | None = None
     date_start: StrictStr | None = None
     date_end: StrictStr | None = None
 
@@ -55,7 +56,7 @@ def attach_imports(app, settings, require_space, *, enabled, model=None, clock=N
 
     @app.post('/api/spaces/{space}/imports/upload')
     async def upload(space: str, request: Request,
-                     source: Literal['chatgpt','claude','gemini','memory'],
+                     source: ImportSource,
                      filename: Annotated[str,Query(min_length=1,max_length=512)]):
         target=await run_in_threadpool(store,space)
         size=0
@@ -67,7 +68,7 @@ def attach_imports(app, settings, require_space, *, enabled, model=None, clock=N
             async for chunk in request.stream():
                 size+=len(chunk)
                 if size>MAX_UPLOAD_BYTES:
-                    raise HTTPException(413,'上传文件超过 90 MiB 上限，请将 JSON 单独压成 ZIP 后上传')
+                    raise HTTPException(413,upload_limit_message(source))
                 await run_in_threadpool(temporary.write,chunk)
 
             def prepare():

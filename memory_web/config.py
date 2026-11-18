@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 from memory_core.conversations.conversation_rounds import DEFAULT_TURN_TIMEOUT_SECONDS
-from memory_core.models.model_config import ModelRole, RecallModelsConfig
+from memory_core.models.model_config import DEFAULT_EXTRACTION_TIMEOUT_SECONDS, ModelRole, RecallModelsConfig
 
 @dataclass(frozen=True)
 class WebSettings:
@@ -47,7 +47,7 @@ class WebSettings:
     image_description_max_images: int = 32
     summary_timeout_seconds: float = 120
     diary_timeout_seconds: float = 300
-    extraction_timeout_seconds: float = 600
+    extraction_timeout_seconds: float = DEFAULT_EXTRACTION_TIMEOUT_SECONDS
     topic_summary_timeout_seconds: float = 300
     receipt_judge_model: str | None = None
     receipt_judge_base_url: str | None = None

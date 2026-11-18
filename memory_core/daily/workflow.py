@@ -89,7 +89,7 @@ def main(argv=None):
         # JSON decoder errors contain snippets, and arbitrary caller types can
         # include material values. Emit only the type at the CLI boundary.
         parser.exit(2,f'操作停止：输入、版本或固定响应无效（{type(exc).__name__}）\n')
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=False, default=str))
 
 
 if __name__=='__main__':

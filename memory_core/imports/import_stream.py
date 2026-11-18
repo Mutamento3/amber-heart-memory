@@ -17,6 +17,7 @@ from ..storage.clock import business_day_label
 from .import_formats import (ImportDay, ImportFormatError, MAX_UPLOAD_BYTES,
     MAX_JSON_BYTES, SOURCES, _object, _identifier, _hash, _chatgpt, _claude,
     _split, _memory, _gemini)
+from .kelivo import kelivo_days
 
 
 class JsonReader(RawIOBase):
@@ -48,9 +49,14 @@ def json_records(stream):
         raise ImportFormatError('文件不是有效的 UTF-8 官方 JSON 导出，请勿上传 HTML') from None
 
 
-def documents(source, uploads, max_bytes, max_json_bytes):
-    uploaded = declared = 0
-    budget = dict(used=0,limit=max_json_bytes)
+def upload_limit_message(source):
+    if source == 'kelivo':
+        return '上传文件超过 90 MiB 上限，请在 Kelivo 只勾选要导入的类别后重新备份'
+    return '上传文件超过 90 MiB 上限，请将 JSON 单独压成 ZIP 后上传'
+
+
+def upload_files(source, uploads, max_bytes):
+    uploaded = 0
     for filename, stream in uploads:
         if not isinstance(filename,str):
             raise ImportFormatError('上传文件格式不正确')
@@ -62,7 +68,14 @@ def documents(source, uploads, max_bytes, max_json_bytes):
         uploaded += stream.tell()
         stream.seek(0)
         if uploaded > max_bytes:
-            raise ImportFormatError('上传文件超过 90 MiB 上限，请将 JSON 单独压成 ZIP 后上传')
+            raise ImportFormatError(upload_limit_message(source))
+        yield filename, stream
+
+
+def documents(source, uploads, max_json_bytes):
+    declared = 0
+    budget = dict(used=0,limit=max_json_bytes)
+    for filename, stream in uploads:
         suffix = PurePosixPath(filename).suffix.lower()
         if source == 'memory':
             if suffix not in ('.md','.txt'):
@@ -133,11 +146,15 @@ def iter_upload(source, uploads, settings, *, max_bytes=MAX_UPLOAD_BYTES,
                 max_json_bytes=MAX_JSON_BYTES, temp_dir=None):
     """Stream (filename, seekable binary file) pairs into one material at a time."""
     if source not in SOURCES:
-        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini 官方导出或记忆文件')
-    streams = documents(source,uploads,max_bytes,max_json_bytes)
+        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini、Kelivo 导出或记忆文件')
+    files = upload_files(source,uploads,max_bytes)
     seen = {}
 
     def items():
+        if source == 'kelivo':
+            yield from kelivo_days(files,settings,temp_dir)
+            return
+        streams = documents(source,files,max_json_bytes)
         if source == 'gemini':
             yield from gemini_days(streams,settings,temp_dir)
             return

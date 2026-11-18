@@ -655,11 +655,14 @@ def create_app(
                     LOG.warning('draft_restructure_model_failed space=%s draft=%s code=%s', space, draft_id, event['code'])
 
             try:
-                store.restructure(target, structurer=daily.extraction_models.stage('structure',record), clock=daily.clock)
+                store.restructure(target, structurer=daily.extraction_models.stage('structure',record), clock=daily.clock,
+                    model_timeout=settings.extraction_timeout_seconds)
             except StructureInProgress:
                 # The other caller will publish the new version for both to read.
                 return
             except Exception as error:
+                if isinstance(error, RevisionConflict) and not isinstance(error, ExtractionConfigurationChanged):
+                    return
                 code = ('structure:configuration_changed' if isinstance(error, ExtractionConfigurationChanged)
                         else 'structure:material_expired' if isinstance(error, MaterialExpired) else 'structure:unknown')
                 LOG.warning('draft_restructure_failed space=%s draft=%s type=%s code=%s',

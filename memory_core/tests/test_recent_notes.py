@@ -37,6 +37,15 @@ class TidyContractTests(unittest.TestCase):
         self.assertIn('现在超过字数线，要提删减建议，目标是让记忆书签降到10字左右，低一点也可以。', prompt)
         self.assertTrue(all('【'+entry+'】' in material for entry in entries))
 
+    def test_switched_off_section_is_not_given_to_the_secretary(self):
+        sections = dict(health='2026年11月9日 事实', longterm='', daily='日常')
+        people = dict(user=dict(name='小禾'), assistant=dict(name='林舟'))
+        prompt, material, entries = prepare_request(sections, TidyPolicy(), people, NOW.date())
+        self.assertEqual(set(entries), {'健康1','日常1'})
+        self.assertNotIn('月经周期】', material)
+        self.assertIn('【长期事项】（0字）', material)
+        self.assertIn('各分区合计14字', prompt)
+
     def test_validator_drops_invalid_overlapping_cross_section_and_star_deletions(self):
         entries = build_entries(dict(period='经期', health='★用药\n复查', longterm='项目', daily='日常'))
         candidates = [None, dict(type='未知',targets=['健康2'],new_text='新'),

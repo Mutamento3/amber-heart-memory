@@ -22,7 +22,7 @@ from memory_core.storage.schema import RECENT_NOTES_VERSION
 from ..admin.access_keys import InvalidAccessKey, KeyConfigurationError
 from ..proxy.hosted_context import MissingRecallModels
 from .mcp_tools import MemoryArguments, memory_description, render_result
-from .bookmark_tool import BookmarkArguments, description as bookmark_description, render_bookmarks
+from .bookmark_tool import BookmarkArguments, description as bookmark_description, input_schema as bookmark_schema, render_bookmarks
 
 LOG = logging.getLogger('memory_web.mcp')
 
@@ -79,7 +79,7 @@ def attach_mcp(app, settings, keys, *, models=None):
                                                  idempotentHint=False, openWorldHint=False))]
         if service.store.schema_version >= RECENT_NOTES_VERSION:
             definitions.append(Tool(name='mark_moment', title='记书签', description=bookmark_description(policy),
-                inputSchema=BookmarkArguments.model_json_schema(), annotations=ToolAnnotations(
+                inputSchema=bookmark_schema(policy), annotations=ToolAnnotations(
                     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)))
         return definitions
 

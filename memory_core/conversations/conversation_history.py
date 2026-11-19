@@ -14,7 +14,7 @@ from .conversation_rounds import ConversationConflict
 from ..storage.db import connect
 from ..storage.space import read_policy
 from ..storage.schema import RECENT_NOTES_VERSION
-from ..bookmarks.recent_note_text import render_recent_notes, SECTIONS
+from ..bookmarks.recent_note_text import enabled_sections, render_recent_notes, SECTIONS
 from ..recall.tool_history import render_tool_card
 
 
@@ -110,7 +110,7 @@ class ConversationHistory:
             recent_notes = {}
             if self.schema_version >= RECENT_NOTES_VERSION:
                 notes = c.execute('SELECT period,health,longterm,daily FROM memory_core.recent_notes WHERE bot_id=%s', (self.space_id,)).fetchone()
-                recent_notes = dict(notes) if notes else {}
+                recent_notes = {key: notes[key] for key in enabled_sections(policy)} if notes else {}
             if self.schema_version >= 13 and recent_diary_count:
                 from ..daily.diaries import recent_diaries
 

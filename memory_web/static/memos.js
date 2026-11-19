@@ -92,6 +92,8 @@ export async function memosPage(main, {api, read, keepView, url, esc, state, epo
   if (!live()) return;
   let saved = initial, sections = {...saved.sections}, job = secretary.job, selected = new Set(), undo = null, markers = {}, adopted = null;
   let activeSection = 'health', editor = null, openMenu = null, stale = false, bookmarks = pending.items;
+  // Sections switched off in settings are left out of the read, so they stay hidden here.
+  const shownSections = () => Object.entries(SECTIONS).filter(([key]) => Object.hasOwn(saved.sections, key));
   const showError = (error, target = $('#memos-error')) => { if (live()) target.textContent = error.message; };
   const clearError = () => { $('#memos-error').textContent = ''; };
   const delta = (n) => n > 0 ? `+${n}` : `${n}`;
@@ -221,7 +223,7 @@ export async function memosPage(main, {api, read, keepView, url, esc, state, epo
     renderNotesCount();
     renderAdoption();
     // Each section is its own card, numbered like the self-hosted snapshot page.
-    $('#notes-sections').innerHTML = Object.entries(SECTIONS).map(([key, label], number) => `
+    $('#notes-sections').innerHTML = shownSections().map(([key, label], number) => `
       <section class="card memo-section" data-section="${key}" aria-labelledby="notes-${key}">
         <header class="memo-section-head"><span class="memo-no" aria-hidden="true">${String(number + 1).padStart(2, '0')}</span><h3 id="notes-${key}">${label}</h3><span class="meta memo-section-count"></span><button type="button" class="quiet add-note">＋ 添加</button></header>
         <div class="memo-rows">${lines(sections[key]).map((_, index) => `<article class="memo-row" data-index="${index}"></article>`).join('')}</div>
@@ -391,7 +393,7 @@ export async function memosPage(main, {api, read, keepView, url, esc, state, epo
     $('#pending-help').hidden = !bookmarks.length;
     $('#pending-help').textContent = `共 ${bookmarks.length} 条 · 今晚整理后并入已整理，之前可以撤回`;
     // Grouped like the organized tab: one numbered card per section that has bookmarks.
-    $('#pending-bookmarks').innerHTML = Object.entries(SECTIONS).map(([key, label], number) => {
+    $('#pending-bookmarks').innerHTML = shownSections().map(([key, label], number) => {
       const items = bookmarks.filter(item => item.section === key);
       if (!items.length) return '';
       return `<section class="card pending-section" data-section="${key}" aria-labelledby="pending-${key}">
@@ -424,7 +426,7 @@ export async function memosPage(main, {api, read, keepView, url, esc, state, epo
     const preview = done ? tidyPreview(job, selected) : null;
     const controlsDisabled = isStale() || !!adopted || !done;
     const titles = {idle: '让秘书帮忙合并和精简', running: '秘书正在整理…', done: '整理建议', failed: '本次整理未完成', cancelled: '本次整理已取消', applied: '本次整理已采纳并保存'};
-    panel.innerHTML = `<div class="panelhead"><h2 id="tidy-title">秘书整理</h2><button type="button" class="quiet" id="close-tidy">收起</button></div><p class="muted">${titles[job.status] || titles.idle}${running ? ' 可以离开本页，稍后再来看。' : ''}</p>${job.error ? `<p class="error">${esc(job.error)}</p>` : ''}${!secretary.configured ? '<p class="muted">请先在服务器配置秘书整理的模型岗位。</p>' : ''}<div class="memo-toolbar"><button type="button" id="start-tidy" ${running || !secretary.configured || !!adopted ? 'disabled' : ''}>${job.id ? '重新整理' : '开始整理'}</button>${running ? '<button type="button" class="quiet" id="cancel-tidy">取消整理</button>' : ''}</div>${isStale() && !stale ? '<p class="error">记忆书签在整理之后有了变化，请重新整理。</p>' : ''}${done ? `<p class="tidy-total">${total(job.base_sections)} → <strong>${total(preview.sections)}</strong> 字 <span class="meta">（${delta(total(preview.sections) - total(job.base_sections))}）</span></p><div class="tidy-tabs" role="tablist" aria-label="整理分区">${Object.entries(SECTIONS).map(([key, label]) => `<button type="button" role="tab" data-tidy-section="${key}" aria-selected="${activeSection === key}" aria-controls="tidy-suggestions" id="tidy-tab-${key}">${label}<small>${count(job.base_sections[key])} → ${count(preview.sections[key])} 字 · ${job.suggestions.filter(s => s.section === key).length} 处</small></button>`).join('')}</div><div id="tidy-suggestions" role="tabpanel" aria-labelledby="tidy-tab-${activeSection}"></div><div class="tidy-selection"><span>已选 ${selected.size} / ${job.suggestions.length} 处</span><button type="button" class="quiet" id="tidy-all" ${controlsDisabled ? 'disabled' : ''}>全选</button><button type="button" class="quiet" id="tidy-none" ${controlsDisabled ? 'disabled' : ''}>全不选</button><button type="button" class="primary" id="adopt-tidy" ${controlsDisabled || !selected.size ? 'disabled' : ''}>采纳所选建议</button></div>` : ''}${job.note ? `<p class="muted tidy-note">${esc(job.note)}</p>` : ''}${job.dropped?.length ? `<p class="muted">有 ${job.dropped.length} 项不符合整理规则，已过滤。</p>` : ''}`;
+    panel.innerHTML = `<div class="panelhead"><h2 id="tidy-title">秘书整理</h2><button type="button" class="quiet" id="close-tidy">收起</button></div><p class="muted">${titles[job.status] || titles.idle}${running ? ' 可以离开本页，稍后再来看。' : ''}</p>${job.error ? `<p class="error">${esc(job.error)}</p>` : ''}${!secretary.configured ? '<p class="muted">请先在服务器配置秘书整理的模型岗位。</p>' : ''}<div class="memo-toolbar"><button type="button" id="start-tidy" ${running || !secretary.configured || !!adopted ? 'disabled' : ''}>${job.id ? '重新整理' : '开始整理'}</button>${running ? '<button type="button" class="quiet" id="cancel-tidy">取消整理</button>' : ''}</div>${isStale() && !stale ? '<p class="error">记忆书签在整理之后有了变化，请重新整理。</p>' : ''}${done ? `<p class="tidy-total">${total(job.base_sections)} → <strong>${total(preview.sections)}</strong> 字 <span class="meta">（${delta(total(preview.sections) - total(job.base_sections))}）</span></p><div class="tidy-tabs" role="tablist" aria-label="整理分区">${shownSections().map(([key, label]) => `<button type="button" role="tab" data-tidy-section="${key}" aria-selected="${activeSection === key}" aria-controls="tidy-suggestions" id="tidy-tab-${key}">${label}<small>${count(job.base_sections[key])} → ${count(preview.sections[key])} 字 · ${job.suggestions.filter(s => s.section === key).length} 处</small></button>`).join('')}</div><div id="tidy-suggestions" role="tabpanel" aria-labelledby="tidy-tab-${activeSection}"></div><div class="tidy-selection"><span>已选 ${selected.size} / ${job.suggestions.length} 处</span><button type="button" class="quiet" id="tidy-all" ${controlsDisabled ? 'disabled' : ''}>全选</button><button type="button" class="quiet" id="tidy-none" ${controlsDisabled ? 'disabled' : ''}>全不选</button><button type="button" class="primary" id="adopt-tidy" ${controlsDisabled || !selected.size ? 'disabled' : ''}>采纳所选建议</button></div>` : ''}${job.note ? `<p class="muted tidy-note">${esc(job.note)}</p>` : ''}${job.dropped?.length ? `<p class="muted">有 ${job.dropped.length} 项不符合整理规则，已过滤。</p>` : ''}`;
     $('#close-tidy').onclick = () => { setTidyOpen(false); tidyButton.focus(); };
     $('#start-tidy').onclick = () => secretaryAction('start');
     if (running) $('#cancel-tidy').onclick = () => secretaryAction('cancel');

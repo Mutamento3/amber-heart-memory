@@ -107,6 +107,7 @@ class Catalog:
                 "core_memory": policy.get("core_memory", ""),
                 "auto_approve_enabled": policy.get("auto_approve_enabled",policy.get("review_mode","auto")=="auto"),
                 "auto_approve_delay_hours": self.approval_policy.delay_hours,
+                "period_notes_enabled": policy.get("period_notes_enabled", True),
                 "topics": topics,
                 "known_entities": context["known_entities"],
                 "review_snapshot": connection.execute(

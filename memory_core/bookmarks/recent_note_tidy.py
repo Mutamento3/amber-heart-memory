@@ -28,7 +28,8 @@ def build_entries(sections):
 
 def prepare_request(sections, policy, participants, today):
     entries = build_entries(sections)
-    total = sum(char_count(sections.get(section, '')) for section in SECTIONS)
+    # Only the space's visible sections are given to the secretary.
+    total = sum(char_count(sections[section]) for section in SECTIONS if section in sections)
     mode = (f'现在超过字数线，要提删减建议，目标是让记忆书签降到{policy.target}字左右，低一点也可以。'
             if total > policy.soft_limit else
             '现在没有超过字数线：只做合并和精简（规则一、二、三），不要提删除建议，规则四不适用。')
@@ -39,7 +40,7 @@ def prepare_request(sections, policy, participants, today):
         prompt = prompt.replace('{{' + key + '}}', str(value))
     material = '\n\n'.join(f'【{label}】（{char_count(sections.get(section, ""))}字）\n' + '\n'.join(
         f'【{key}】{entry["text"]}' for key, entry in entries.items() if entry['section']==section)
-        for section, label in SECTIONS.items())
+        for section, label in SECTIONS.items() if section in sections)
     return prompt, material, entries
 
 

@@ -271,7 +271,7 @@ class SpaceConfiguration:
 
 
     def set_auto_approval(self, space_id, *, expected_revision, enabled):
-        from .schema import DELAYED_APPROVAL_VERSION, TOPIC_SUMMARY_VERSION
+        from .schema import DELAYED_APPROVAL_VERSION
         if type(enabled) is not bool:
             raise ValueError('到期自动入库开关必须是布尔值')
         with connect(self.dsn) as connection:
@@ -281,18 +281,37 @@ class SpaceConfiguration:
                 raise ValueError('空间尚未配置')
             connection.execute('''UPDATE memory_core.space_policies SET auto_approve_enabled=%s,revision=revision+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s''', (enabled,space_id))
-            # Only the switch changed: advance current drafts, never silently
-            # accept an older semantic configuration or reset the waiting clock.
-            connection.execute('''UPDATE memory_core.pending_memories SET policy_revision=%s,version=version+1
-                WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','structure_pending','structure_failed')''',
-                (expected_revision+1,space_id,expected_revision))
-            connection.execute('''UPDATE memory_core.material_extractions SET policy_revision=%s,version=version+1
-                WHERE bot_id=%s AND policy_revision=%s''',(expected_revision+1,space_id,expected_revision))
-            if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] >= TOPIC_SUMMARY_VERSION:
-                connection.execute('''UPDATE memory_core.topic_summary_batches SET policy_revision=%s,version=version+1
-                    WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','generating','failed')''',
-                    (expected_revision+1,space_id,expected_revision))
+            self._advance_switch_revision(connection, space_id, expected_revision)
             return read_policy(connection,space_id)
+
+    def set_period_notes(self, space_id, *, expected_revision, enabled):
+        from .schema import PERIOD_NOTES_SWITCH_VERSION
+        if type(enabled) is not bool:
+            raise ValueError('月经周期开关必须是布尔值')
+        with connect(self.dsn) as connection:
+            if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] < PERIOD_NOTES_SWITCH_VERSION:
+                raise ValueError(f'月经周期开关需要先升级记忆核心到版本 {PERIOD_NOTES_SWITCH_VERSION}')
+            if not self._lock(connection,space_id,expected_revision):
+                raise ValueError('空间尚未配置')
+            connection.execute('''UPDATE memory_core.space_policies SET period_notes_enabled=%s,revision=revision+1,
+                updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s''', (enabled,space_id))
+            self._advance_switch_revision(connection, space_id, expected_revision)
+            return read_policy(connection,space_id)
+
+    @staticmethod
+    def _advance_switch_revision(connection, space_id, expected_revision):
+        from .schema import TOPIC_SUMMARY_VERSION
+        # Only a switch changed: advance current drafts, never silently
+        # accept an older semantic configuration or reset the waiting clock.
+        connection.execute('''UPDATE memory_core.pending_memories SET policy_revision=%s,version=version+1
+            WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','structure_pending','structure_failed')''',
+            (expected_revision+1,space_id,expected_revision))
+        connection.execute('''UPDATE memory_core.material_extractions SET policy_revision=%s,version=version+1
+            WHERE bot_id=%s AND policy_revision=%s''',(expected_revision+1,space_id,expected_revision))
+        if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] >= TOPIC_SUMMARY_VERSION:
+            connection.execute('''UPDATE memory_core.topic_summary_batches SET policy_revision=%s,version=version+1
+                WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','generating','failed')''',
+                (expected_revision+1,space_id,expected_revision))
 
     def edit_topic(self, space_id, topic_id, *, expected_revision, name=None, summary_eligible=None, description=None):
         with connect(self.dsn) as connection:

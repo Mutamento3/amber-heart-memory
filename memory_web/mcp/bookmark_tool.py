@@ -3,10 +3,10 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
-from memory_core.bookmarks.recent_note_text import SECTIONS
+from memory_core.bookmarks.recent_note_text import SECTIONS, enabled_sections
 
-DESCRIPTION = """你可以为值得记住的片刻记书签。记忆书签分【月经周期】【健康关注】【长期事项】【日常杂记】四个分区。新记的书签每天夜里会原样加进已整理的书签；已整理的书签每轮都会提供给你，帮助你了解{user_name}的近况。整理前，你可以随时查看（list）、改写（update）、撤回（delete）。已经整理的书签这里改不了，有新进展或更正就新记一条。
-什么值得记：听到新信息时问自己，如果下次完全不知道这件事，会不会让你显得不懂{user_name}、忘掉重要进展或约定，或让回答明显变差？会的话就主动 add，不必等{user_name}说"记住"。月经周期、健康变化、长期事项和有延续价值的日常经历通常值得记；普通撒娇、玩笑、短暂情绪和寒暄不记。
+DESCRIPTION = """你可以为值得记住的片刻记书签。记忆书签分{section_list}{section_count}个分区。新记的书签每天夜里会原样加进已整理的书签；已整理的书签每轮都会提供给你，帮助你了解{user_name}的近况。整理前，你可以随时查看（list）、改写（update）、撤回（delete）。已经整理的书签这里改不了，有新进展或更正就新记一条。
+什么值得记：听到新信息时问自己，如果下次完全不知道这件事，会不会让你显得不懂{user_name}、忘掉重要进展或约定，或让回答明显变差？会的话就主动 add，不必等{user_name}说"记住"。{worth}通常值得记；普通撒娇、玩笑、短暂情绪和寒暄不记。
 同一件事只留一条：准备记录时，如果不确定是否已经记过同一件事，先 list 查一下。已经有了、现在有补充、进展或更正，就 update 改写原来那条：把新旧信息合成一条完整的客观事实，被更正的旧说法直接去掉，不要另起一条。发现同一件事有好几条，update 其中一条写成完整版，再 delete 其余的。记错或已不需要的直接 delete。
 不要每轮例行 list，只在准备记录或修改时查。"""
 
@@ -21,8 +21,26 @@ class BookmarkArguments(BaseModel):
     ids: list[StrictStr] | None = Field(default=None, description='书签编号（list 返回的短编号）。update 填 1 个；delete 可填多个。')
 
 
+class BookmarkArgumentsWithoutPeriod(BookmarkArguments):
+    model_config = ConfigDict(extra='forbid', title='BookmarkArguments')
+    section: Literal['health','longterm','daily'] | None = Field(default=None,
+        description='分区：health=健康关注，longterm=长期事项，daily=日常杂记。add 必填；list 不填查全部；update 可选，填了就挪到新分区')
+
+
+def period_enabled(policy):
+    return 'period' in enabled_sections(policy)
+
+
 def description(policy):
-    return DESCRIPTION.format(user_name=policy['participants']['user']['name'])
+    period = period_enabled(policy)
+    return DESCRIPTION.format(user_name=policy['participants']['user']['name'],
+        section_list=''.join(f'【{SECTIONS[key]}】' for key in enabled_sections(policy)),
+        section_count='四' if period else '三',
+        worth=('月经周期、' if period else '') + '健康变化、长期事项和有延续价值的日常经历')
+
+
+def input_schema(policy):
+    return (BookmarkArguments if period_enabled(policy) else BookmarkArgumentsWithoutPeriod).model_json_schema()
 
 
 def render_bookmarks(action, result):

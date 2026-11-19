@@ -10,9 +10,9 @@ from ..storage.clock import format_timestamp
 from ..daily.daily_tasks import finish_task, require_task
 from ..storage.db import background_lock, connect
 from ..storage.postgres import PostgresStore
-from .recent_note_text import SECTIONS, char_count
+from .recent_note_text import SECTIONS, char_count, enabled_sections
 from .recent_note_tidy import build_entries
-from ..storage.schema import RECENT_NOTES_VERSION
+from ..storage.schema import PERIOD_NOTES_SWITCH_VERSION, RECENT_NOTES_VERSION
 from ..storage.space import RevisionConflict, read_policy
 
 
@@ -29,6 +29,13 @@ class RecentNotesStore(PostgresStore):
         with connect(self.dsn) as c:
             return read_policy(c, self.space_id)
 
+    def enabled(self, c):
+        """Visible sections; a switched-off section keeps its stored text."""
+        if self.schema_version < PERIOD_NOTES_SWITCH_VERSION:
+            return list(SECTIONS)
+        row = c.execute('SELECT period_notes_enabled FROM memory_core.space_policies WHERE bot_id=%s', (self.space_id,)).fetchone()
+        return enabled_sections(row)
+
     def _empty(self):
         return dict(bot_id=self.space_id, version=0, tidy_job={}, **dict.fromkeys(SECTIONS, ''))
 
@@ -39,7 +46,8 @@ class RecentNotesStore(PostgresStore):
     def read(self, policy):
         with connect(self.dsn) as c:
             row = c.execute('SELECT * FROM memory_core.recent_notes WHERE bot_id=%s', (self.space_id,)).fetchone() or self._empty()
-        sections = {section: row[section] for section in SECTIONS}
+            visible = self.enabled(c)
+        sections = {section: row[section] for section in visible}
         counts = {section: char_count(value) for section, value in sections.items()}
         total = sum(counts.values())
         return dict(sections=sections, version=row['version'], counts=counts, total_chars=total,
@@ -124,7 +132,7 @@ class RecentNotesStore(PostgresStore):
             row = self._lock(c)
             if row['tidy_job'].get('status')=='running':
                 return row['tidy_job'], False
-            sections = {section: row[section] for section in SECTIONS}
+            sections = {section: row[section] for section in self.enabled(c)}
             job = dict(id=str(uuid4()), status='running', base_version=row['version'], base_sections=sections,
                 entries=build_entries(sections), suggestions=[], need_confirm=[], dropped=[], note='', error='',
                 soft_limit=policy.soft_limit, target=policy.target, started_at=self.timestamp(), finished_at=None)

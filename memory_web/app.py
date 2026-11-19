@@ -133,6 +133,11 @@ class AutoApprovalPatch(Body):
     auto_approve_enabled: StrictBool
 
 
+class PeriodNotesPatch(Body):
+    expected_revision: Annotated[StrictInt, Field(gt=0)]
+    period_notes_enabled: StrictBool
+
+
 class DiaryPatch(Body):
     expected_revision: Annotated[StrictInt, Field(gt=0)]
     content: Annotated[StrictStr, Field(min_length=1, max_length=100000)]
@@ -524,6 +529,16 @@ def create_app(
             space,
             expected_revision=body.expected_revision,
             enabled=body.auto_approve_enabled,
+        )
+        return catalog.configuration(space)
+
+    @app.patch("/api/spaces/{space}/period-notes")
+    def update_period_notes(space: str, body: PeriodNotesPatch):
+        require_space(space)
+        config.set_period_notes(
+            space,
+            expected_revision=body.expected_revision,
+            enabled=body.period_notes_enabled,
         )
         return catalog.configuration(space)
 

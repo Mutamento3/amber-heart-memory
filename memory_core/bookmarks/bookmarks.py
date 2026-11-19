@@ -26,9 +26,11 @@ class BookmarkStore(RecentNotesStore):
         if section is not None and section not in SECTIONS:
             raise ValueError('section 必须是 period / health / longterm / daily')
         with connect(self.dsn) as c:
+            visible = self.enabled(c)
             rows = c.execute('''SELECT * FROM memory_core.moment_bookmarks WHERE bot_id=%s
                 AND (%s::text IS NULL OR section=%s) ORDER BY created_at::timestamptz DESC,id DESC''',
                 (self.space_id, section, section)).fetchall()
+        rows = [row for row in rows if row['section'] in visible]
         rank = {value: index for index, value in enumerate(SECTIONS)}
         rows.sort(key=lambda row: rank[row['section']])
         items = rows if limit is None else rows[:limit]
@@ -56,6 +58,8 @@ class BookmarkStore(RecentNotesStore):
             identifiers = list(dict.fromkeys(identifier.lower() for identifier in identifiers))
         with connect(self.dsn) as c:
             self._lock(c)
+            if section is not None and section not in self.enabled(c):
+                raise ValueError(f'【{SECTIONS[section]}】分区已关闭，请换其他分区')
             if action=='add':
                 instant = now or datetime.now(timezone.utc)
                 row = c.execute('''INSERT INTO memory_core.moment_bookmarks(id,bot_id,section,content,business_date,created_at)

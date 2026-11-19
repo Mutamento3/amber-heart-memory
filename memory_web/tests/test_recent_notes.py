@@ -28,7 +28,7 @@ from memory_core.testing.provider_server import ProviderServer
 from memory_core.tests.support import DatabaseTestCase
 from memory_web.admin.access_keys import AccessKeys
 from memory_web.app import create_app
-from memory_web.mcp.bookmark_tool import DESCRIPTION, BookmarkArguments
+from memory_web.mcp.bookmark_tool import BookmarkArguments, description as bookmark_description
 from memory_web.config import WebSettings
 from memory_web.jobs.daily_jobs import DailyJobs
 from memory_web.install import install_web
@@ -185,7 +185,8 @@ class RecentNoteWebTests(DatabaseTestCase):
         response = self.http.post('/mcp',headers={**self.auth(),'Accept':'application/json, text/event-stream'},
             json=dict(jsonrpc='2.0',id=1,method='tools/list'))
         definitions = {tool['name']:tool for tool in response.json()['result']['tools']}
-        self.assertEqual(definitions['mark_moment']['description'],DESCRIPTION.format(user_name='小禾'))
+        self.assertEqual(definitions['mark_moment']['description'],bookmark_description(dict(participants=dict(user=dict(name='小禾')))))
+        self.assertIn('【月经周期】【健康关注】【长期事项】【日常杂记】四个分区',definitions['mark_moment']['description'])
         self.assertEqual(definitions['mark_moment']['inputSchema']['properties']['content']['anyOf'][0]['type'],'string')
         added = self.mark(section='health',content='2026年11月8日\n已经复查')
         self.assertFalse(added['isError'])
@@ -198,6 +199,49 @@ class RecentNoteWebTests(DatabaseTestCase):
         missing = self.mark(action='update',ids=[identifier],content='新进展')
         self.assertTrue(missing['isError'])
         self.assertIn('已经整理',str(missing))
+
+    def tools(self):
+        response = self.http.post('/mcp',headers={**self.auth(),'Accept':'application/json, text/event-stream'},
+            json=dict(jsonrpc='2.0',id=1,method='tools/list'))
+        return {tool['name']:tool for tool in response.json()['result']['tools']}
+
+    def test_period_switch_hides_section_keeps_text_and_narrows_tool(self):
+        self.login()
+        self.edit('period','2026年11月1日 经期开始')
+        self.edit('health','2026年11月2日 复查')
+        pending = self.mark(section='period',content='2026年11月8日 经期结束')['structuredContent']['id']
+        config = self.http.get('/api/spaces/one/configuration').json()
+        self.assertTrue(config['period_notes_enabled'])
+        response = self.write('/api/spaces/one/period-notes',dict(expected_revision=config['revision'],period_notes_enabled=False),method='PATCH')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse(response.json()['period_notes_enabled'])
+        read = self.read()
+        self.assertEqual(set(read['sections']),{'health','longterm','daily'})
+        self.assertEqual(read['total_chars'],read['counts']['health'])
+        self.assertEqual(self.http.get('/api/spaces/one/bookmarks').json()['items'],[])
+        tool = self.tools()['mark_moment']
+        self.assertNotIn('月经',tool['description'])
+        self.assertIn('【健康关注】【长期事项】【日常杂记】三个分区',tool['description'])
+        self.assertNotIn('period',json.dumps(tool['inputSchema']))
+        refused = self.mark(section='period',content='2026年11月9日 不该记下')
+        self.assertTrue(refused['isError'])
+        self.assertIn('已关闭',str(refused))
+        self.assertTrue(self.mark(action='update',ids=[pending[:8]],section='period',content='2026年11月9日 不能挪进来')['isError'])
+        self.assertEqual(self.mark(action='list')['structuredContent']['items'],[])
+        # Saving the visible sections leaves the hidden text untouched.
+        self.edit('health','2026年11月3日 复查完')
+        with connect(self.app) as c:
+            self.assertEqual(c.execute("SELECT period FROM memory_core.recent_notes WHERE bot_id='one'").fetchone()['period'],'2026年11月1日 经期开始')
+        body = dict(model='synthetic-round',messages=[dict(role='user',content='继续聊')])
+        self.assertEqual(self.http.post('/v1/chat/completions',headers=self.auth(),json=body).status_code,200)
+        self.http.portal.call(self.application.state.proxy.drain)
+        injection = next(message['content'] for message in self.fake.requests[-1]['body']['messages'] if '<bookmarks>' in str(message.get('content')))
+        self.assertNotIn('月经',injection)
+        self.assertIn('复查完',injection)
+        response = self.write('/api/spaces/one/period-notes',dict(expected_revision=response.json()['revision'],period_notes_enabled=True),method='PATCH')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.read()['sections']['period'],'2026年11月1日 经期开始')
+        self.assertEqual([item['section'] for item in self.http.get('/api/spaces/one/bookmarks').json()['items']],['period'])
 
     def test_management_requires_admin_cookie_origin_and_csrf_not_space_key(self):
         for path in (self.path,self.path+'/tidy','/api/spaces/one/bookmarks'):

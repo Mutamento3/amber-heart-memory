@@ -8,6 +8,12 @@ PREFIXES = {'period': '周期', 'health': '健康', 'longterm': '长期', 'daily
 SPACE = re.compile('[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]')
 
 
+def enabled_sections(policy):
+    """Section keys this space uses; the period section can be switched off."""
+    enabled = (policy or {}).get('period_notes_enabled', True)
+    return [key for key in SECTIONS if key != 'period' or enabled]
+
+
 def char_count(text):
     return len(SPACE.sub('', text))
 

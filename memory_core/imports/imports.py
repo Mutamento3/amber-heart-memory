@@ -89,7 +89,9 @@ class ImportStore(DraftStore):
                     if item.source!=source or (item.is_kelivo_memory and not kelivo):
                         raise ImportFormatError('导入来源与材料不符')
                     material_input(item.segments,self.settings,item.business_date,
-                                   allow_undated=kelivo and item.is_kelivo_memory and item.business_date is None)
+                                   allow_undated=item.business_date is None and (
+                                       (kelivo and item.is_kelivo_memory) or source=='memory'),
+                                   partial_date=source=='memory')
                     check_credentials(item.title)
                     row = (job['id'],self.space_id,ordinal,item.conversation_key,item.title,item.business_date,
                         item.source_key,item.message_count,Jsonb(item.segments),timestamp,timestamp)

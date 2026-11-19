@@ -149,6 +149,7 @@ class DraftStore(GraphStore):
             business_date,
             message_business_dates=message_business_dates,
             allow_undated=undated,
+            partial_date=material_kind == 'memory',
         )
         check_credentials([source_key, request_key])
         digest = hashlib.sha256(json.dumps([day,source_kind,segments], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -405,7 +406,7 @@ class DraftStore(GraphStore):
                     rewritten=value.pop('content')
                     content=source['segments'][0]['text'] if rewritten is None else text(rewritten,'content')
                     check_credentials([title,content])
-                    result=structure(value,context)
+                    result=structure(value,context,partial_date=True)
                     if result['source_date'] != source['business_date']:
                         raise ContractError('memory_source_date_changed')
                     return dict(result,title=title,content=content)
@@ -484,7 +485,8 @@ class DraftStore(GraphStore):
             narrative_fields = ('title','content','summary','importance','evidence')
             # summary belongs to both contracts, with the final reviewed value.
             first = narrative({k:payload.get(k) for k in narrative_fields},source['segments'],edited=True)
-            second = structure({k:v for k,v in payload.items() if k not in ('title','content','importance','evidence')},context)
+            second = structure({k:v for k,v in payload.items() if k not in ('title','content','importance','evidence')},context,
+                partial_date=source.get('material_kind')=='memory')
             revised = {**first,**second}
             ready_clause=''
             values=[Jsonb(first),Jsonb(revised),context['policy_revision']]

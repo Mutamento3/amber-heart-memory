@@ -1,6 +1,6 @@
 """Supported storage versions; migrations are ordered and immutable once applied."""
 
-LATEST_VERSION = 29
+LATEST_VERSION = 30
 GRAPH_VERSION = 3
 DRAFT_VERSION = 4
 REVIEW_VERSION = 5
@@ -28,6 +28,7 @@ STRUCTURE_CLAIM_VERSION = 26
 DEEPSEEK_IMPORT_VERSION = 27
 IMPORT_LIFECYCLE_VERSION = 28
 PERIOD_NOTES_SWITCH_VERSION = 29
+MEMORY_PARTIAL_DATE_VERSION = 30
 SUPPORTED_VERSIONS = frozenset(range(1, LATEST_VERSION + 1))
 
 MIGRATION_FILES = {
@@ -59,4 +60,5 @@ MIGRATION_FILES = {
     27: "027_deepseek_import.sql",
     28: "028_import_lifecycle.sql",
     29: "029_period_notes_switch.sql",
+    30: "030_memory_file_partial_dates.sql",
 }

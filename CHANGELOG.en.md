@@ -4,6 +4,10 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.3.2 · 2026-11-19
+
+- When importing memories you organized yourself, the date no longer has to be an exact day: write `## 2025-03` or `## 2025` if you only remember the month or the year, or `## 未注明` ("not given") if you don't remember. Cards keep the date as written, never filled in to a day or replaced by the import date; when filtering by date, a month or year counts as the whole period. See the [memory file import guide](docs/import/memory-file.en.md).
+
 ## v0.3.1 · 2026-11-19
 
 - The "Period" (月经周期) section of memory bookmarks can be turned off (Settings → Memory bookmarks). When off, the section is hidden, left out of chats and secretary tidying, and removed from the AI's bookmark tool; anything already saved is kept and comes back when you turn it on again.

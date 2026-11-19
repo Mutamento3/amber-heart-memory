@@ -7,7 +7,7 @@ import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from memory_core.storage.config import Settings
-from memory_core.cards.extraction_contract import check_credentials, material_input
+from memory_core.cards.extraction_contract import ContractError, check_credentials, material_input
 from memory_core.imports.import_formats import ImportFormatError, parse_upload
 from memory_core.imports.import_preview import preview
 
@@ -247,8 +247,24 @@ class MemoryFileTests(unittest.TestCase):
         self.assertEqual(len(items),1)
         self.assertIn('## 2020-01-01',items[0].segments[0]['text'])
 
+    def test_memory_dates_may_be_a_month_a_year_or_not_given(self):
+        body='## 2025-03\n月份记忆。\n## 2025\n年份记忆。\n## 未注明\n无日期记忆。\n## 小标题仍是正文\n'
+        items=parse_upload('memory',[('memory.md',body.encode())],SETTINGS)
+        self.assertEqual({item.segments[0]['text']:item.business_date for item in items},
+            {'月份记忆。':'2025-03','年份记忆。':'2025','无日期记忆。\n## 小标题仍是正文':None})
+        undated=next(item for item in items if item.business_date is None)
+        self.assertEqual((undated.title,undated.source_key[:21]),('未注明','import:memory:undated'))
+        for item in items:
+            segments,day=material_input(item.segments,SETTINGS,item.business_date,
+                allow_undated=item.business_date is None,partial_date=True)
+            self.assertEqual(day,item.business_date)
+        with self.assertRaises(ContractError):
+            material_input(items[0].segments,SETTINGS,'2025-03')
+        summary=preview(items,daily_limit=5)
+        self.assertEqual((summary['memory_count'],summary['first_date'],summary['last_date']),(3,'2025','2025-03'))
+
     def test_invalid_empty_and_unlabelled_memory_are_rejected(self):
-        for body in ('随手写的无日期内容','## 2025-02-30\n无效日期','## 2025-03-14\n',''):
+        for body in ('随手写的无日期内容','## 2025-02-30\n无效日期','## 2025-03-14\n','## 2025-13\n无效月份','## 2025-3\n月份要两位',''):
             with self.assertRaises(ImportFormatError):
                 parse_upload('memory',[('memory.md',body.encode())],SETTINGS)
 

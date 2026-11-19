@@ -106,9 +106,18 @@ def iso_date(value):
     return value
 
 
+def memory_date(value):
+    """Imported memory dates may name only a year or a month."""
+    if isinstance(value, str) and (
+            (re.fullmatch(r'\d{4}', value) and int(value) >= 1)
+            or (re.fullmatch(r'\d{4}-\d{2}', value) and int(value[:4]) >= 1 and 1 <= int(value[5:]) <= 12)):
+        return value
+    return iso_date(value)
+
+
 def material_input(
     segments, settings, explicit_business_date=None, *, message_business_dates=None,
-    allow_undated=False,
+    allow_undated=False, partial_date=False,
 ):
     if not isinstance(segments, list) or not segments:
         raise ContractError('segments_required')
@@ -147,7 +156,7 @@ def material_input(
     ):
         raise ContractError("invalid_message_day_mapping")
     if explicit_business_date is not None:
-        days.add(iso_date(explicit_business_date))
+        days.add((memory_date if partial_date else iso_date)(explicit_business_date))
     if len(days) != 1 and not (allow_undated and not days):
         raise ContractError('split_material_by_business_day')
     check_credentials(result)
@@ -196,7 +205,7 @@ def selection_result(raw, segments):
     return [narrative(item, segments) for item in value['memories']], value['skipped_reason']
 
 
-def structure(value, context):
+def structure(value, context, *, partial_date=False):
     fields = ('summary', 'experience_mode', 'cognitive_status', 'decay_layer', 'source_date',
               'is_milestone', 'valence', 'arousal', 'entities', 'relations', 'topic_ids')
     keys(value, fields, 'structure')
@@ -205,7 +214,7 @@ def structure(value, context):
     for field, allowed in (('experience_mode', MODES), ('cognitive_status', COGNITIVE_STATUSES), ('decay_layer', LAYERS)):
         if result[field] not in allowed:
             raise ContractError('invalid_enum:' + field)
-    iso_date(result['source_date'])
+    (memory_date if partial_date else iso_date)(result['source_date'])
     if type(result['is_milestone']) is not bool:
         raise ContractError('invalid_milestone')
     for field, low in (('valence', -1), ('arousal', 0)):

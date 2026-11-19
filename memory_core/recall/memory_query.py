@@ -5,6 +5,7 @@ import re
 
 from ..storage.clock import format_timestamp
 from ..storage.db import connect
+from .date_period import period_end, period_start
 from .rerank import order_candidates
 from .recall_config import RecallSettings
 from .search import ThreeRouteSearch
@@ -68,10 +69,10 @@ class MemoryQueryStore(SearchStore):
         if not args.get('include_outdated', False):
             clauses.append("m.cognitive_status<>'outdated'")
         if since:
-            clauses.append('left(m.source_date,10)>=%s')
+            clauses.append(period_end('m.source_date')+'>=%s')
             values.append(since)
         if until:
-            clauses.append('left(m.source_date,10)<=%s')
+            clauses.append(period_start('m.source_date')+'<=%s')
             values.append(until)
         if args.get('topic'):
             topic = resolve_dimension(args['topic'], self.topics(), '主题')

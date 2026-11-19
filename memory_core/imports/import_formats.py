@@ -218,17 +218,37 @@ def _split(source, key, title, segments, settings, *, assistant_key=None, assist
         for day, messages in sorted(days.items())]
 
 
+UNDATED_MEMORY = "未注明"
+MEMORY_HEADING_HELP = "可以写 ## 2025-03-14、## 2025-03、## 2025，不记得日期写 ## 未注明"
+
+
+def memory_heading_date(text):
+    """A full day, a month, a year, or None for an undated entry."""
+    if text == UNDATED_MEMORY:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return date.fromisoformat(text).isoformat()
+        if re.fullmatch(r"\d{4}-\d{2}", text) and 1 <= int(text[5:]) <= 12 and int(text[:4]) >= 1:
+            return text
+        if re.fullmatch(r"\d{4}", text) and int(text) >= 1:
+            return text
+    except ValueError:
+        pass
+    raise ImportFormatError(f"记忆日期“{text}”无效：{MEMORY_HEADING_HELP}")
+
+
 def _memory(source):
-    day, lines, fence = None, [], None
+    day, started, lines, fence = None, False, [], None
 
     def finish():
         content = "\n".join(lines).strip()
-        if day is not None and not content:
+        if started and not content:
             raise ImportFormatError("记忆日期标题后必须有正文")
         if content:
             digest = _hash(content)
-            return ImportDay("memory", digest, day, day,
-                f"import:memory:{day}:{digest}",
+            return ImportDay("memory", digest, day or UNDATED_MEMORY, day,
+                f"import:memory:{day or 'undated'}:{digest}",
                 [dict(segment_id="m-0", speaker="user", text=content, timestamp=None)])
 
     for raw_line in source:
@@ -239,18 +259,15 @@ def _memory(source):
                 fence = marker[1]
             elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
                 fence = None
-        heading = None if fence else re.fullmatch(r"##\s+(\d{4}-\d{2}-\d{2})\s*", line)
+        # Other "##" lines stay part of the body, as before.
+        heading = None if fence else re.fullmatch(r"##\s+(\d{4}(?:-\d+){0,2}|未注明)\s*", line)
         if heading:
             item = finish()
             if item is not None:
                 yield item
-            try:
-                day = date.fromisoformat(heading[1]).isoformat()
-            except ValueError:
-                raise ImportFormatError("记忆日期必须是有效的 YYYY-MM-DD") from None
-            lines = []
-        elif day is None and line.strip():
-            raise ImportFormatError("记忆文件每条需以 ## YYYY-MM-DD 开头")
+            day, started, lines = memory_heading_date(heading[1]), True, []
+        elif not started and line.strip():
+            raise ImportFormatError(f"记忆文件每条需以日期标题开头：{MEMORY_HEADING_HELP}")
         else:
             lines.append(line)
     item = finish()

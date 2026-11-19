@@ -130,6 +130,35 @@ class ImportStoreTests(DatabaseTestCase):
         self.assertEqual(self.store.get(second['id'])['progress']['skipped'],1)
         self.assertEqual(self.selector.calls,1)
 
+    def test_memory_file_keeps_partial_and_missing_dates_through_approval(self):
+        data='## 2025-03\n合成月份记忆。\n## 2025\n合成年份记忆。\n## 未注明\n合成无日期记忆。'.encode()
+        job=self.upload('memory',[('memory.md',data)])
+        self.store.confirm(job['id'],now=self.now)
+        self.process(job['id'])
+        drafts={draft['payload']['content']:draft for draft in self.store.list()}
+        self.assertEqual({content:draft['payload']['source_date'] for content,draft in drafts.items()},
+            {'合成月份记忆。':'2025-03','合成年份记忆。':'2025','合成无日期记忆。':None})
+        class Embedder:
+            def embed(self,text): return [1,0,0]
+        for index,draft in enumerate(drafts.values()):
+            result=ReviewStore(self.app,'one').approve(draft['id'],expected_version=draft['version'],
+                expected_policy_revision=draft['policy_revision'],request_key=f'synthetic-partial-{index}',
+                embedder=Embedder(),embedding_model='synthetic-vector')
+            self.assertEqual(result['status'],'approved')
+        with connect(self.app) as c:
+            dates={row['content']:row['source_date'] for row in c.execute("SELECT content,source_date FROM memory_core.memory_items WHERE bot_id='one'")}
+        self.assertEqual(dates,{'合成月份记忆。':'2025-03','合成年份记忆。':'2025','合成无日期记忆。':None})
+        # A month or year counts as its whole period when filtering by day.
+        from memory_core.recall.memory_query import MemoryQueryStore
+        query=MemoryQueryStore(self.app,'one')
+        for since,until,expected in (('2025-03-10','2025-03-20',{'合成月份记忆。','合成年份记忆。'}),
+                                     ('2025-07-01',None,{'合成年份记忆。'}),
+                                     (None,'2024-12-31',set())):
+            where,values=query.filters(dict(date_from=since,date_to=until))
+            with connect(self.app) as c:
+                found={row['content'] for row in c.execute('SELECT m.content FROM memory_core.memory_items m WHERE '+where,values)}
+            self.assertEqual(found,expected,(since,until))
+
     def test_memory_bypasses_selection_and_quota_preserves_body_and_date(self):
         original='合成原文：每周练习陶艺。\n\n第二段保持原样。'
         data=('## 2025-03-14\n'+original+'\n## 2025-03-14\n合成第二条记忆。').encode()

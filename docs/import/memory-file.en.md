@@ -10,7 +10,12 @@ Xiaoyu and Ayan went to the seaside together for the first time. Before setting 
 
 ## 2025-05-02
 Xiaoyu and Ayan had a fight. Xiaoyu had been staying up late for days to meet a deadline; Ayan kept telling her to go to sleep, she found it annoying, said something hurtful in anger and turned off her phone. The next day they talked it through and agreed never to go to bed angry.
+
+## 未注明
+Xiaoyu doesn't eat coriander or spring onions; add a note when ordering takeaway.
 ```
+
+Write the date as `## 2025-03-14`. If you only remember the month or the year, write `## 2025-03` or `## 2025`; if you don't remember at all, write `## 未注明` ("not given", keep it in Chinese). The date is when it happened; the import date is never used in its place, and cards without a date show "未注明".
 
 Write with names, not "I" or "he": the text is stored in a card, and in later recall "I" can't tell who is who. Either the names or the nicknames from Settings will do; replace Xiaoyu and Ayan in the example with your own names.
 

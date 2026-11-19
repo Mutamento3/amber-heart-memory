@@ -41,6 +41,12 @@ class TopicSummarySettings:
 def event_date(card, core):
     raw = card['source_date'] or card['created_at']
     try:
+        # Imported memories may give only a year or a month: order them by the
+        # first day of that period.
+        if len(raw) == 4:
+            return date(int(raw), 1, 1)
+        if len(raw) == 7:
+            return date(int(raw[:4]), int(raw[5:]), 1)
         if len(raw) == 10:
             return date.fromisoformat(raw)
         value = datetime.fromisoformat(raw)

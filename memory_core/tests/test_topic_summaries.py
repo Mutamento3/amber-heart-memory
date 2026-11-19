@@ -68,6 +68,9 @@ class WindowTests(unittest.TestCase):
         reserved=self.plans(['2026-09-01'],blocked=[('2026-10','2026-10')])[0]
         self.assertEqual(reserved['end_month'],'2026-09')
         with self.assertRaises(ValueError):event_date(self.cards(['invalid'])[0],Settings(3))
+        partial=self.cards(['2025-07','2025'])
+        self.assertEqual([event_date(row,Settings(3)).isoformat() for row in partial],['2025-07-01','2025-01-01'])
+        self.assertEqual([(r['start_month'],r['end_month']) for r in self.plans(['2025','2025-07'])],[('2025-01','2025-07')])
         with self.assertRaises(ValueError):TopicSummarySettings(0,30)
 
     def test_whole_month_overflow_is_not_truncated(self):

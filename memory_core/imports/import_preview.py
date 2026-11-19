@@ -91,8 +91,11 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
             key=item.conversation_key, title=item.title, first_date=item.business_date,
             last_date=item.business_date, day_count=0, message_count=0,
             imported_day_count=0, selected=item.conversation_key in selected))
-        record["first_date"] = min(record["first_date"], item.business_date)
-        record["last_date"] = max(record["last_date"], item.business_date)
+        # Memory-file entries may be undated; chat days always have a date.
+        dates = [value for value in (record["first_date"], item.business_date) if value is not None]
+        record["first_date"] = min(dates, default=None)
+        dates = [value for value in (record["last_date"], item.business_date) if value is not None]
+        record["last_date"] = max(dates, default=None)
         record["day_count"] += 1
         record["message_count"] += item.message_count
         record["imported_day_count"] += item.source_key in imported
@@ -122,7 +125,7 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
     chats = [item for item in chosen if not item.is_kelivo_memory]
     days = {item.business_date for item in chats}
     minimum = len(chosen)
-    dates = [item.business_date for item in conversations_items]
+    dates = [item.business_date for item in conversations_items if item.business_date is not None]
     # Every conversation/day needs selection. Structure consumes the same
     # shared daily quota as live chat, not a separate quota per conversation.
     maximum = minimum if source == "memory" else minimum + sum(

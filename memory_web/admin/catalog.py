@@ -18,6 +18,7 @@ from memory_core.lifecycle.archive_policy import ArchiveSettings, receipt_health
 from memory_core.cards.drafts import DraftStore, context_for
 from memory_core.imports.imports import direct_import_draft_filter
 from memory_core.cards.daily_cards import extraction_counts
+from memory_core.recall.date_period import period_end, period_start
 from memory_core.recall.query import keyword_query
 from memory_core.recall.search_store import SearchStore
 from memory_core.storage.space import read_policy, read_topics
@@ -324,10 +325,10 @@ class Catalog:
             )
             parameters.append(topic)
         if since:
-            filters.append("m.source_date>=%s")
+            filters.append(period_end("m.source_date") + ">=%s")
             parameters.append(since)
         if until:
-            filters.append("m.source_date<=%s")
+            filters.append(period_start("m.source_date") + "<=%s")
             parameters.append(until)
         base = (
             " FROM memory_core.memory_items m "

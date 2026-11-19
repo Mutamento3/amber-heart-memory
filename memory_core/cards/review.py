@@ -133,7 +133,8 @@ class ReviewStore(DraftStore):
                 raise ValueError('原文已删除，不能首次确认收录')
             first=narrative({k:draft['payload'][k] for k in ('title','content','summary','importance','evidence')},
                 source['segments'],edited=True)
-            second=structure({k:v for k,v in draft['payload'].items() if k not in ('title','content','importance','evidence')},context)
+            second=structure({k:v for k,v in draft['payload'].items() if k not in ('title','content','importance','evidence')},context,
+                partial_date=source.get('material_kind')=='memory')
             payload={**first,**second}
         if embedder is None:
             raise ValueError('必须显式提供嵌入岗位')

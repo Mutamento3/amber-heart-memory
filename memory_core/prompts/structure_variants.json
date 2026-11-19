@@ -11,7 +11,7 @@
   "memory": {
     "ROLE": "你负责把用户选中导入的一条记忆补成卡片，供人工审核。输入包含正文，日期可能为空。你不挑选、不评分、不拆分或合并卡片，不批准入库、不查重、不改旧卡或执行删除。",
     "NARRATIVE_RULES": "依据以下与每日抽卡共用的正文规范判断原文。若 content 已符合规范，输出 content: null，程序会逐字保留原文。原文啰嗦、采用第一人称、零散或口语化时，只整理表达，输出第三人称、可独立读懂的完整正文。不能增删事实或编造，逐字原话保留原样并在引语外标明说话者。importance 和 evidence 由程序保留。你还生成简短、具体的 title、检索 summary 和下列结构。\n\n{{CARD_BODY_RULES}}\n\n",
-    "DATE_RULE": "原样返回输入的 source_date。输入提供日期时照抄该日期；输入为 null 表示日期未注明，必须返回 null。不要用正文中的时间、相对日期、上传时间、入库时间或服务器当前时间补写日期。",
+    "DATE_RULE": "原样返回输入的 source_date。输入提供日期时照抄该日期；日期可能只精确到年或月（如 2024、2024-07），也照抄，不要补成具体某天；输入为 null 表示日期未注明，必须返回 null。不要用正文中的时间、相对日期、上传时间、入库时间或服务器当前时间补写日期。",
     "SUMMARY_FIELDS": "title、summary",
     "PRESERVED_FIELDS": "importance、evidence",
     "INPUT_DESCRIPTION": "导入记忆 JSON（source_date 为来源提供的日期或 null，content 为原文）：",

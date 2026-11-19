@@ -438,6 +438,8 @@ git pull
 
 `install.sh` 检测到已有配置时只做升级：重新构建、自动升级数据库结构、重启服务，配置和数据都保持不变。
 
+每个版本改了什么，见[更新日志](CHANGELOG.md)。
+
 记忆数据存在服务器的数据库里，不在 git 仓库里；仓库根目录的 `.env` 不要删，丢了它，已经生成的访问钥匙就都失效了。
 
 ## 已知限制
@@ -452,6 +454,7 @@ git pull
 amber-heart-memory/
 ├── README.md / README.en.md   中英文说明
 ├── LICENSE                    AGPL-3.0 许可证
+├── CHANGELOG.md               更新日志（每个版本改了什么）
 ├── install.sh                 安装和升级入口
 ├── compose.yaml / Caddyfile   容器与自动 HTTPS 配置
 ├── .env.example               模型、域名等配置示例

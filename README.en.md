@@ -440,6 +440,8 @@ git pull
 
 When `install.sh` finds an existing configuration, it only upgrades: it rebuilds, upgrades the database schema automatically and restarts the services, keeping the configuration and data unchanged.
 
+See the [changelog](CHANGELOG.en.md) for what changed in each version.
+
 Memory data lives in the database on the server, not in the git repository; don't delete the `.env` in the repository root, because if it's lost, all access keys already generated stop working.
 
 ## Known limitations
@@ -454,6 +456,7 @@ Memory data lives in the database on the server, not in the git repository; don'
 amber-heart-memory/
 ├── README.md / README.en.md   Chinese and English docs
 ├── LICENSE                    AGPL-3.0 license
+├── CHANGELOG.md               Changelog (what changed in each version)
 ├── install.sh                 Install and upgrade entry point
 ├── compose.yaml / Caddyfile   Containers and automatic HTTPS
 ├── .env.example               Example config: models, domain and more

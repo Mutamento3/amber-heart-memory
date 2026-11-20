@@ -234,6 +234,22 @@ class ProxyTests(DatabaseTestCase):
         self.assertEqual(self.rows('conversation_messages')[0]['content_parts'], [{'type': 'image_placeholder'}])
         self.assertNotIn('SYNTHETIC_IMAGE', str(self.rows('conversation_turns')))
 
+    def test_unsupported_parts_in_old_messages_are_dropped_but_named_in_this_round(self):
+        body = self.body()
+        video = {'type': 'video_url', 'video_url': {'url': 'data:video/mp4;base64,SYNTHETIC_VIDEO'}}
+        body['messages'] = [
+            {'role': 'user', 'content': [{'type': 'text', 'text': '合成旧问句'}, video]},
+            {'role': 'assistant', 'content': '合成旧回答'},
+            {'role': 'user', 'content': '合成问句'},
+        ]
+        self.assertEqual(self.chat(body).status_code, 200)
+        self.assertNotIn('SYNTHETIC_VIDEO', json.dumps(self.fake.requests[-1]['body']))
+        body = self.body()
+        body['messages'][0]['content'] = [{'type': 'text', 'text': '合成问句'}, video]
+        response = self.chat(body)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('video_url', response.text)
+
     def test_unsolicited_tool_tail_is_rejected_before_upstream(self):
         body = self.body()
         body['messages'] += [{'role': 'tool', 'tool_call_id': 'call-unknown', 'content': '合成结果'}]

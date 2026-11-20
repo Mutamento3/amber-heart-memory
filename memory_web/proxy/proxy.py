@@ -421,9 +421,18 @@ class ProxyService:
         messages = body.get('messages')
         if not isinstance(messages, list) or not messages or any(not isinstance(m, dict) or m.get('role') not in ('system','developer','user','assistant','tool') for m in messages):
             raise ValueError('messages 格式无效')
-        for message in messages:
-            if isinstance(message.get('content'), list) and any(not isinstance(p, dict) or p.get('type') not in ('text','image_url') for p in message['content']):
-                raise ValueError('前端消息只接受文字或图片内容')
+        # Apps resend the whole conversation; only this round (from the last user
+        # message on) is used, so older messages just drop parts we don't keep.
+        current = max((i for i, m in enumerate(messages) if m['role'] == 'user'), default=0)
+        for index, message in enumerate(messages):
+            if isinstance(message.get('content'), list):
+                if index < current:
+                    message['content'] = [p for p in message['content'] if isinstance(p, dict) and p.get('type') in ('text','image_url')]
+                else:
+                    for p in message['content']:
+                        if not isinstance(p, dict) or p.get('type') not in ('text','image_url'):
+                            kind = p.get('type') if isinstance(p, dict) and isinstance(p.get('type'), str) else '未知'
+                            raise ValueError(f'暂不支持的消息内容类型：{kind[:40]}（目前只支持文字和图片）')
             content_parts(message.get('content'))
             if message['role'] == 'tool' and (not isinstance(message.get('tool_call_id'), str) or not 1 <= len(message['tool_call_id']) <= 256):
                 raise ValueError('工具结果缺少有效调用编号')

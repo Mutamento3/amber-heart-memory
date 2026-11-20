@@ -4,6 +4,11 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.4.1 · 2026-11-20
+
+- Chat apps resend the whole conversation each time. Amber Heart never used those older messages, and now no longer checks their content types either, so a video or file in an old message no longer makes the whole request fail. If the current turn contains an unsupported content type, the error names that type.
+- The import description in Settings no longer lists every source.
+
 ## v0.4.0 · 2026-11-20
 
 - New: hook integration. If you run your own frontend and backend, you can keep your own context assembly and use Amber Heart only for memory: fetch core memory, memory bookmarks, recent diaries and instant summaries at session start, fetch recalled cards before each model call, and send the finished turn back to be recorded, after which card extraction, diaries and summaries run as usual. Regenerating a turn replaces the previous reply; your own frontend can also attach images. See the [hook guide](docs/hooks.en.md).

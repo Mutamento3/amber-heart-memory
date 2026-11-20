@@ -75,6 +75,12 @@ class HostedContext:
             for p in content_parts(body["messages"][-1].get("content"))
             if p["type"] == "text"
         ).strip()
+        snapshot = await self.recall(store, query, source["history"])
+        return await run_in_threadpool(
+            store.save_context, record, body, source, snapshot
+        )
+
+    async def recall(self, store, query, history):
         snapshot = {"status": "skipped_image", "cards": []}
         if query:
             started = monotonic()
@@ -128,7 +134,7 @@ class HostedContext:
                     cleaner=models,
                     reranker=models,
                     selector=models,
-                    messages=source["history"],
+                    messages=history,
                     check_time=check_time,
                     on_progress=save_progress,
                 )
@@ -154,6 +160,4 @@ class HostedContext:
                     "error_type": type(exc).__name__,
                 }
             snapshot["elapsed_ms"] = round((monotonic() - started) * 1000)
-        return await run_in_threadpool(
-            store.save_context, record, body, source, snapshot
-        )
+        return snapshot

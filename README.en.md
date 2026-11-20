@@ -244,6 +244,7 @@ In short: what it stores is not a line of chat, but a structured experience.
 - **API mode (recommended, the main way)**: in your chat app, replace the API address with the memory server's address and the API key with an access key generated in the admin web app. You choose the main chat model in the app as usual; but requests are forwarded by the memory server to the "chat" provider you set during installation, so pick a provider that has the model you want to talk to. To use models from several vendors such as Claude, GPT, Gemini and DeepSeek, one OpenRouter key covers them all.
 - **MCP (supplementary)**: for programs that support Streamable HTTP and custom request headers. The address is `/mcp` on the same service, and the request header is `Authorization: Bearer <access key>`, using the same key as API mode. The AI can actively search memories and save bookmarks; newly saved bookmarks are organized each night as they are.
   - With API mode only and no MCP, the AI won't save bookmarks by itself; with MCP only and no API mode, memories won't be injected into chats, and cards and diaries won't be produced automatically.
+- **Hooks (custom clients and Claude Code)** let you keep your own context and model calls while integrating memory on each turn. Configure the nightly receipt judge when using hooks. Without it, automatic archiving pauses. [Hook integration guide](docs/hooks.en.md)
 
 ### Which app to use
 

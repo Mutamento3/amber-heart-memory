@@ -22,6 +22,8 @@ from memory_core.cards.review_policy import ApprovalSettings
 from memory_core.lifecycle.archive_policy import ArchiveSettings
 from memory_core.lifecycle.archives import ArchiveStore
 from memory_core.storage.schema import DELAYED_APPROVAL_VERSION, ARCHIVE_VERSION, TOPIC_SUMMARY_VERSION, RECENT_NOTES_VERSION
+from memory_core.storage.schema import HOOK_VERSION
+from memory_core.conversations.hook_turns import HookTurns
 from memory_core.bookmarks.recent_notes import RecentNotesStore
 from ..models.topic_summary_model import TopicSummaryModel
 from .daily_topic_summaries import DailyTopicSummaries
@@ -56,6 +58,7 @@ class DailyJobs:
             self.archive_enabled = version >= ARCHIVE_VERSION
             self.topic_summary_enabled = version >= TOPIC_SUMMARY_VERSION
             self.recent_notes_enabled = version >= RECENT_NOTES_VERSION
+            self.hooks_enabled = version >= HOOK_VERSION
         self.model = model or DiaryModel(settings)
         self.enabled = enabled
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -301,6 +304,8 @@ class DailyJobs:
         await run_in_threadpool(
             ConversationStore.expire_leases, self.settings.dsn, now=now
         )
+        if self.hooks_enabled:
+            await run_in_threadpool(HookTurns.expire_pending, self.settings.dsn, self.core, now)
         for space in await run_in_threadpool(self.spaces):
             if space not in self.tasks:
                 task = asyncio.create_task(self.run_space(space, now))

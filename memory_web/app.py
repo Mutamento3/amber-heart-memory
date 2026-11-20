@@ -58,6 +58,7 @@ from .admin.static_assets import StaticAssets
 from .config import WebSettings
 from .admin.access_keys import AccessKeys, KeyConfigurationError
 from .proxy.proxy import attach_proxy
+from .hooks import EVENTS as HOOK_EVENTS, attach_hooks
 from .mcp.mcp import attach_mcp
 from .jobs.daily_jobs import DailyJobs
 from .models.extraction_model import ExtractionModel
@@ -257,6 +258,7 @@ def create_app(
 
     app.router.lifespan_context = daily_lifespan
     attach_mcp(app, settings, keys, models=recall_models or embedder or providers)
+    attach_hooks(app, version)
 
     @app.exception_handler(DiaryConflict)
     async def diary_conflict(request, exc):
@@ -277,7 +279,7 @@ def create_app(
             path = request.url.path
             # Machine credentials are a separate boundary: no browser session,
             # Origin or CSRF requirement, and never administrator privileges.
-            if path.startswith('/v1/') or path in ('/mcp', '/mcp/'):
+            if path.startswith('/v1/') or path in ('/mcp', '/mcp/') or path in HOOK_EVENTS:
                 response = await call_next(request)
                 response.headers['Cache-Control'] = 'no-store'
                 response.headers['X-Content-Type-Options'] = 'nosniff'

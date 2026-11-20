@@ -13,6 +13,7 @@ from .conversation_context import (
     tool_result_pairs,
 )
 from ..storage.db import connect
+from ..storage.schema import HOOK_VERSION
 
 DEFAULT_TURN_TIMEOUT_SECONDS = 300
 
@@ -119,8 +120,12 @@ class ConversationRounds:
             return row is not None and row['state'] in ('complete','upstream_failed')
 
     def _latest(self, c):
+        # The proxy's similarity heuristic must never replace an explicitly
+        # numbered external turn when both clients share a space.
+        proxy_only = " AND t.hook_session IS NULL" if self.schema_version >= HOOK_VERSION else ""
         return c.execute(
-            "SELECT * FROM memory_core.conversation_turns WHERE bot_id=%s AND history_state='current' AND content_deleted_at IS NULL ORDER BY position_id DESC LIMIT 1",
+            "SELECT * FROM memory_core.conversation_turns t WHERE bot_id=%s AND history_state='current' AND content_deleted_at IS NULL"
+            + proxy_only + " ORDER BY position_id DESC LIMIT 1",
             (self.space_id,),
         ).fetchone()
 
@@ -172,10 +177,11 @@ class ConversationRounds:
         if target is not None:
             raise ConversationConflict("指定目标轮次时须明确操作类型")
         if latest:
+            proxy_only = " AND t.hook_session IS NULL" if self.schema_version >= HOOK_VERSION else ""
             newest = c.execute(
                 """SELECT m.id,m.turn_id FROM memory_core.conversation_messages m JOIN memory_core.conversation_turns t ON (t.id,t.bot_id)=(m.turn_id,m.bot_id)
                 WHERE m.bot_id=%s AND m.role='assistant' AND t.history_state='current' AND t.content_deleted_at IS NULL
-                ORDER BY t.position_id DESC,m.event_index DESC LIMIT 1""",
+                """ + proxy_only + " ORDER BY t.position_id DESC,m.event_index DESC LIMIT 1",
                 (self.space_id,),
             ).fetchone()
             if newest is None or newest["turn_id"] != latest["id"]:

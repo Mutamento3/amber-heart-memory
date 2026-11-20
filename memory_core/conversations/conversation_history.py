@@ -13,7 +13,7 @@ from .conversation_context import freeze_message, thaw_message, timed_content
 from .conversation_rounds import ConversationConflict
 from ..storage.db import connect
 from ..storage.space import read_policy
-from ..storage.schema import RECENT_NOTES_VERSION
+from ..storage.schema import DIARY_VERSION, RECENT_NOTES_VERSION, SUMMARY_VERSION
 from ..bookmarks.recent_note_text import enabled_sections, render_recent_notes, SECTIONS
 from ..recall.tool_history import render_tool_card
 
@@ -88,7 +88,55 @@ def render_turn(turn, messages, tools, settings):
     return rendered
 
 
+def memory_context_sections(source, day, settings):
+    """The four model-visible memory sections shared by both chat entry points."""
+    policy = source["policy"]
+    user_name = policy["participants"]["user"]["name"]
+    core = policy.get("core_memory", "")
+    diaries, notes, summaries = (
+        source.get("diaries", []), source.get("recent_notes", {}), source.get("summaries", [])
+    )
+    start, end = business_day_bounds(date.fromisoformat(day), settings)
+    return {
+        "core_memory": text.CORE_MEMORY_INJECTION.format(user_name=user_name, content=core)
+        if core.strip() else "",
+        "diary": text.DIARY_INJECTION.format(
+            user_name=user_name,
+            diaries="\n\n".join(
+                text.DIARY_ENTRY.format(date=d["business_date"], content=d["content"]) for d in diaries
+            ),
+        ) if diaries else "",
+        "recent_notes": render_recent_notes(notes, user_name)
+        if any(notes.get(section, "").strip() for section in SECTIONS) else "",
+        "summary": text.SUMMARY_INJECTION.format(
+            start=f"{start.month}月{start.day}日 {start:%H:%M}",
+            end=f"{end.month}月{end.day}日 {end:%H:%M}",
+            summaries="\n\n".join(s["content"] for s in summaries),
+        ) if summaries else "",
+    }
+
+
 class ConversationHistory:
+
+    def _memory_context(self, c, policy, day, calendar_day, recent_diary_count):
+        diaries = []
+        recent_notes = {}
+        if self.schema_version >= RECENT_NOTES_VERSION:
+            notes = c.execute('SELECT period,health,longterm,daily FROM memory_core.recent_notes WHERE bot_id=%s', (self.space_id,)).fetchone()
+            recent_notes = {key: notes[key] for key in enabled_sections(policy)} if notes else {}
+        if self.schema_version >= DIARY_VERSION and recent_diary_count:
+            from ..daily.diaries import recent_diaries
+
+            diaries = recent_diaries(
+                c, self.space_id, day, recent_diary_count,
+                calendar_day=calendar_day,
+            )
+        summaries = []
+        if self.schema_version >= SUMMARY_VERSION:
+            from ..daily.summaries import active_summaries
+
+            summaries = active_summaries(c, self.space_id, day)
+        return dict(diaries=diaries, recent_notes=recent_notes, summaries=summaries)
 
     def history_input(
         self,
@@ -96,7 +144,8 @@ class ConversationHistory:
         *,
         previous_messages=4,
         max_history_chars=None,
-        recent_diary_count=3
+        recent_diary_count=3,
+        hook_session=None,
     ):
         """No model calls or long transactions while holding the space lock."""
         with connect(self.dsn) as c:
@@ -106,32 +155,23 @@ class ConversationHistory:
                 "SELECT * FROM memory_core.conversation_turns WHERE bot_id=%s AND id=%s",
                 (self.space_id, record["turn_id"]),
             ).fetchone()
-            diaries = []
-            recent_notes = {}
-            if self.schema_version >= RECENT_NOTES_VERSION:
-                notes = c.execute('SELECT period,health,longterm,daily FROM memory_core.recent_notes WHERE bot_id=%s', (self.space_id,)).fetchone()
-                recent_notes = {key: notes[key] for key in enabled_sections(policy)} if notes else {}
-            if self.schema_version >= 13 and recent_diary_count:
-                from ..daily.diaries import recent_diaries
-
-                diaries = recent_diaries(
-                    c, self.space_id, turn["business_date"], recent_diary_count,
-                    calendar_day=datetime.fromisoformat(turn["created_at"])
-                    .astimezone(ZoneInfo(self.settings.timezone)).date(),
-                )
-            summaries = []
-            if self.schema_version >= 12:
-                from ..daily.summaries import active_summaries
-
-                summaries = active_summaries(c, self.space_id, turn["business_date"])
+            memory = self._memory_context(
+                c, policy, turn["business_date"],
+                datetime.fromisoformat(turn["created_at"]).astimezone(
+                    ZoneInfo(self.settings.timezone)
+                ).date(),
+                recent_diary_count,
+            )
             covered_ids = {
-                identifier for s in summaries for identifier in s["covered_turn_ids"]
+                identifier for s in memory["summaries"] for identifier in s["covered_turn_ids"]
             }
+            session_filter = " AND hook_session=%s" if hook_session is not None else ""
+            session_args = (hook_session,) if hook_session is not None else ()
             current = c.execute(
                 """SELECT * FROM memory_core.conversation_turns WHERE bot_id=%s
                 AND business_date=%s AND history_state='current' AND content_deleted_at IS NULL
-                ORDER BY position_id""",
-                (self.space_id, turn["business_date"]),
+                """ + session_filter + " ORDER BY position_id",
+                (self.space_id, turn["business_date"], *session_args),
             ).fetchall()
             # The first request of a business day chooses the carryover. Later
             # requests replay that same prefix, rather than removing it at turn 2.
@@ -141,7 +181,7 @@ class ConversationHistory:
             )
             carry_ids = (
                 seeded["context_manifest"].get("carryover_turn_ids", [])
-                if seeded and not summaries
+                if seeded and not memory["summaries"]
                 else []
             )
             current = [
@@ -151,7 +191,7 @@ class ConversationHistory:
                 and t["position_id"] < turn["position_id"]
                 and t["id"] not in covered_ids
             ]
-            if not seeded and not current and previous_messages and not summaries:
+            if not seeded and not current and previous_messages and not memory["summaries"]:
                 previous = (
                     date.fromisoformat(turn["business_date"]) - timedelta(days=1)
                 ).isoformat()
@@ -159,8 +199,8 @@ class ConversationHistory:
                     """SELECT t.*,count(m.id) AS message_count FROM memory_core.conversation_turns t
                     JOIN memory_core.conversation_messages m ON (m.turn_id,m.bot_id)=(t.id,t.bot_id)
                     WHERE t.bot_id=%s AND t.business_date=%s AND t.history_state='current' AND t.content_deleted_at IS NULL
-                    GROUP BY t.id ORDER BY t.position_id DESC""",
-                    (self.space_id, previous),
+                    """ + session_filter + " GROUP BY t.id ORDER BY t.position_id DESC",
+                    (self.space_id, previous, *session_args),
                 ).fetchall()
                 count = 0
                 for old in candidates:
@@ -225,9 +265,7 @@ class ConversationHistory:
             carryover_turn_ids=[t["id"] for t in carry],
             history_turn_ids=[g["turn_id"] for g in groups],
             history_message_ids=[m["id"] for m in messages if m["turn_id"] in included],
-            summaries=summaries,
-            diaries=diaries,
-            recent_notes=recent_notes,
+            **memory,
             history_omitted=dict(
                 turn_ids=[g["turn_id"] for g in omitted],
                 turns=len(omitted),
@@ -259,9 +297,6 @@ class ConversationHistory:
     def save_context(self, record, body, source, recall):
         original = body["messages"][-1]
         persona = source["policy"].get("persona", "")
-        start, end = business_day_bounds(
-            date.fromisoformat(source["turn"]["business_date"]), self.settings
-        )
         systems = (
             [{"role": "system", "content": persona}]
             if persona.strip()
@@ -274,66 +309,15 @@ class ConversationHistory:
         prefix = systems[:]
         sections = [{"kind": "persona", "start": 0, "end": len(prefix)}]
         # Empty sections are metadata only; no placeholder goes to a model.
-        for kind, messages in (
-            (
-                'core_memory',
-                ([{'role': 'system', 'content': text.CORE_MEMORY_INJECTION.format(
-                    user_name=source['policy']['participants']['user']['name'],
-                    content=source['policy']['core_memory'])}]
-                 if source['policy'].get('core_memory', '').strip() else []),
-            ),
-            (
-                "diary",
-                (
-                    [
-                        {
-                            "role": "system",
-                            "content": text.DIARY_INJECTION.format(
-                                user_name=source["policy"]["participants"]["user"][
-                                    "name"
-                                ],
-                                diaries="\n\n".join(
-                                    text.DIARY_ENTRY.format(
-                                        date=d["business_date"], content=d["content"]
-                                    )
-                                    for d in source.get("diaries", [])
-                                ),
-                            ),
-                        }
-                    ]
-                    if source.get("diaries")
-                    else []
-                ),
-            ),
-            (
-                'recent_notes',
-                ([{'role': 'system', 'content': render_recent_notes(source.get('recent_notes', {}), source['policy']['participants']['user']['name'])}]
-                 if any(source.get('recent_notes', {}).get(section, '').strip() for section in SECTIONS) else []),
-            ),
-            (
-                "summary",
-                (
-                    [
-                        {
-                            "role": "system",
-                            "content": text.SUMMARY_INJECTION.format(
-                                start=f"{start.month}月{start.day}日 {start:%H:%M}",
-                                end=f"{end.month}月{end.day}日 {end:%H:%M}",
-                                summaries="\n\n".join(
-                                    s["content"] for s in source.get("summaries", [])
-                                ),
-                            ),
-                        }
-                    ]
-                    if source.get("summaries")
-                    else []
-                ),
-            ),
-            ("history", source["history"]),
-        ):
+        sections_with_text = memory_context_sections(source, source["turn"]["business_date"], self.settings)
+        for kind, content in sections_with_text.items():
             start = len(prefix)
-            prefix += messages
+            if content:
+                prefix.append({"role": "system", "content": content})
             sections.append(dict(kind=kind, start=start, end=len(prefix)))
+        start = len(prefix)
+        prefix += source["history"]
+        sections.append(dict(kind="history", start=start, end=len(prefix)))
         moment = datetime.fromisoformat(source["turn"]["created_at"]).astimezone(
             ZoneInfo(self.settings.timezone)
         )

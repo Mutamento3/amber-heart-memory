@@ -4,6 +4,12 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.4.0 · 2026-11-20
+
+- New: hook integration. If you run your own frontend and backend, you can keep your own context assembly and use Amber Heart only for memory: fetch core memory, memory bookmarks, recent diaries and instant summaries at session start, fetch recalled cards before each model call, and send the finished turn back to be recorded, after which card extraction, diaries and summaries run as usual. Regenerating a turn replaces the previous reply; your own frontend can also attach images. See the [hook guide](docs/hooks.en.md).
+- Claude Code can connect directly by pasting a snippet into its settings, whether you use it on your computer or behind your own frontend with `claude -p`.
+- Hook integration requires the nightly receipt judge role; without it, automatic archiving pauses.
+
 ## v0.3.3 · 2026-11-20
 
 - Fix: a single piece of text that looked like a password, key, ID or card number (for example a pasted `sk-` API key, or a long order number) made the whole import fail with `credential_content_blocked`, and could make a whole day's card extraction fail. Imports and extraction no longer run this check, so chat history imports as usual.

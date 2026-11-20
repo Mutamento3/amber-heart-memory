@@ -313,18 +313,18 @@ class DraftTests(DatabaseTestCase):
             list(pool.map(lambda pair:self.store.extract(pair[0],selector=pair[1],structurer=pair[1]),zip(ids,models)))
         self.assertEqual(len(self.store.list()),5)
 
-    def test_credential_screen_before_storage_and_after_model_output(self):
+    def test_credential_like_text_is_not_screened_in_material_or_model_output(self):
+        # Self-hosted: the text already went to the chat model and stays on the user's server.
         examples = ('password: synthetic-only-password', '验证码：123456', '银行卡号：4242424242424242', 'sk-'+('A'*25))
         for index,example in enumerate(examples):
-            with self.assertRaises(CredentialContent): self.submit('credential-'+str(index),body=example)
+            self.submit('credential-'+str(index),body=example)
         with connect(self.app) as connection:
-            self.assertEqual(connection.execute('SELECT count(*) AS n FROM memory_core.source_materials').fetchone()['n'],0)
+            self.assertEqual(connection.execute('SELECT count(*) AS n FROM memory_core.source_materials').fetchone()['n'],len(examples))
         extraction = self.submit()
-        candidate = self.candidate(); candidate['summary']='password: synthetic-only-password'
+        candidate = self.candidate(); candidate['summary']='订单号 4242424242424242 已发货'
         model = self.models(extraction,[candidate])
         result = self.store.extract(extraction,selector=model,structurer=model)
-        self.assertEqual(result['status'],'failed')
-        self.assertNotIn('synthetic-only-password',json.dumps(result))
+        self.assertNotEqual(result['status'],'failed')
 
     def test_structural_semantics_topic_scope_and_relation_fallback(self):
         with connect(self.app) as connection: context = context_for(connection,'example')

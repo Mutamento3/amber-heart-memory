@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from ..storage.clock import format_timestamp
 from ..storage.db import background_lock, connect
 from ..cards.drafts import DraftStore, ExtractionConfigurationChanged, MaterialExpired, context_digest, context_for
-from ..cards.extraction_contract import check_credentials, material_input
+from ..cards.extraction_contract import material_input
 from .import_formats import ImportDay, ImportFormatError, SOURCES
 from .import_preview import preview
 from ..storage.schema import (DEEPSEEK_IMPORT_VERSION, IMPORT_APPROVAL_VERSION, IMPORT_LIFECYCLE_VERSION, IMPORT_PROGRESS_VERSION,
@@ -92,11 +92,9 @@ class ImportStore(DraftStore):
                                    allow_undated=item.business_date is None and (
                                        (kelivo and item.is_kelivo_memory) or source=='memory'),
                                    partial_date=source=='memory')
-                    check_credentials(item.title)
                     row = (job['id'],self.space_id,ordinal,item.conversation_key,item.title,item.business_date,
                         item.source_key,item.message_count,Jsonb(item.segments),timestamp,timestamp)
                     if kelivo:
-                        check_credentials(item.assistant_name)
                         row += (item.assistant_key,item.assistant_name,item.is_kelivo_memory)
                     batch.append(row)
                     size += sum(len(segment['text'].encode('utf-8')) for segment in item.segments)

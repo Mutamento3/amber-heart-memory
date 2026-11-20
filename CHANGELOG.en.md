@@ -4,6 +4,10 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.3.3 · 2026-11-20
+
+- Fix: a single piece of text that looked like a password, key, ID or card number (for example a pasted `sk-` API key, or a long order number) made the whole import fail with `credential_content_blocked`, and could make a whole day's card extraction fail. Imports and extraction no longer run this check, so chat history imports as usual.
+
 ## v0.3.2 · 2026-11-19
 
 - When importing memories you organized yourself, the date no longer has to be an exact day: write `## 2025-03` or `## 2025` if you only remember the month or the year, or `## 未注明` ("not given") if you don't remember. Cards keep the date as written, never filled in to a day or replaced by the import date; when filtering by date, a month or year counts as the whole period. See the [memory file import guide](docs/import/memory-file.en.md).

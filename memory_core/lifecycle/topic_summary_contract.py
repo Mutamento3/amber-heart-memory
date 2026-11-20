@@ -56,7 +56,6 @@ def validate_response(raw, ids):
             title, content = text(item['title'],'title'), text(item['content'],'content')
             if len(title) > 300 or len(content) > 100000 or re.search(r'(\[\d+\]|#\d+)', content):
                 raise ValueError()
-            check_credentials([title, content])
             normalized.append(dict(title=title, content=content))
         return dict(topic_summaries=normalized, children=[by_id[mid] for mid in ids])
     except (ValueError, TypeError, KeyError):

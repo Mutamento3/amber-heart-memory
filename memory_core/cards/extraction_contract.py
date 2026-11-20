@@ -48,7 +48,11 @@ def identifier(value, field):
 
 
 def check_credentials(value):
-    """Conservative format/context screening, not a guarantee of secret recognition."""
+    """Conservative format/context screening, not a guarantee of secret recognition.
+
+    Chat material, imports and the cards made from them are not screened: the
+    text already went to the chat model and stays on the user's own server.
+    """
     encoded = json.dumps(value, ensure_ascii=False)
     patterns = (
         r'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----',
@@ -85,7 +89,6 @@ def json_object(raw):
         raise ContractError('invalid_json') from None
     if not isinstance(result, dict):
         raise ContractError('object_required')
-    check_credentials(result)
     return result
 
 
@@ -159,7 +162,6 @@ def material_input(
         days.add((memory_date if partial_date else iso_date)(explicit_business_date))
     if len(days) != 1 and not (allow_undated and not days):
         raise ContractError('split_material_by_business_day')
-    check_credentials(result)
     return result, next(iter(days), None)
 
 
@@ -188,7 +190,6 @@ def narrative(value, segments, *, edited=False):
     if type(score) is not int or not (0 if edited else 1) <= score <= 10:
         raise ContractError('invalid_importance')
     result['evidence'] = evidence(result['evidence'], segments)
-    check_credentials(result)
     return result
 
 
@@ -270,7 +271,6 @@ def structure(value, context, *, partial_date=False):
         text(relation['description'], 'relation_description')
         iso_date(relation['valid_from'])
     result['topic_ids']=validate_topics(result['topic_ids'],context)
-    check_credentials(result)
     return result
 
 

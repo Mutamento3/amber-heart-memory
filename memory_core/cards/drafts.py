@@ -405,7 +405,6 @@ class DraftStore(GraphStore):
                         raise ContractError('memory_content_decision_required')
                     rewritten=value.pop('content')
                     content=source['segments'][0]['text'] if rewritten is None else text(rewritten,'content')
-                    check_credentials([title,content])
                     result=structure(value,context,partial_date=True)
                     if result['source_date'] != source['business_date']:
                         raise ContractError('memory_source_date_changed')

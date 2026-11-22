@@ -7,11 +7,12 @@ from psycopg.types.json import Jsonb
 
 from ..storage.clock import business_day_label, format_timestamp
 from ..storage.db import connect
+from ..storage.schema import HOOK_VERSION
 from ..storage.space import read_policy
 from .conversation_context import content_parts
 from .conversation_history import memory_context_sections
 from .conversation_rounds import ConversationConflict, fingerprint, lock_space_state
-from .conversations import ConversationStore
+from .conversations import ConversationStore, clear_turn_contents, invalidate_summaries
 
 
 PENDING_LIFETIME = timedelta(minutes=30)
@@ -42,7 +43,7 @@ class HookTurns(ConversationStore):
         prompt_filter = "hook_prompt IS NULL"
         args = (self.space_id, session)
         if prompt is not None:
-            prompt_filter = "hook_prompt=%s AND content_deleted_at IS NULL"
+            prompt_filter = "hook_prompt=%s AND (content_deleted_at IS NULL OR context_manifest ? 'deleted_fingerprints')"
             args += (prompt,)
         return c.execute(
             """SELECT * FROM memory_core.conversation_turns
@@ -60,6 +61,8 @@ class HookTurns(ConversationStore):
             self._lock(c)
             turn = self._find(c, session, prompt) if prompt is not None else None
             if turn:
+                if turn["content_deleted_at"] is not None:
+                    raise ConversationConflict("这轮聊天已删除，请发送一条新消息", "hook_turn_deleted")
                 if _expired(turn, now):
                     self._discard(c, self.space_id, [turn["id"]], timestamp)
                 else:
@@ -156,7 +159,7 @@ class HookTurns(ConversationStore):
                     WHERE id=%s AND bot_id=%s""",
                     (timestamp, turn_id, self.space_id),
                 )
-                self._invalidate_summary(c, turn_id, timestamp)
+                invalidate_summaries(c, self.space_id, [turn_id], timestamp)
                 turn_id = self._new_turn(c, session, prompt, timestamp, day, previous=turn)
                 record = self._request(c, {"model": "hook"}, {}, turn_id, 0,
                                        "regenerate", user["request_fingerprint"], timestamp)
@@ -185,36 +188,20 @@ class HookTurns(ConversationStore):
             )
         return dict(turn_id=turn_id, replaced=replaced)
 
-    def _invalidate_summary(self, c, turn_id, timestamp):
-        # Affected leaves and rollups must stay out of future summary batches.
-        c.execute(
-            """UPDATE memory_core.conversation_summaries s SET content=NULL,content_deleted_at=%s
-            FROM memory_core.conversation_summary_turns st
-            WHERE st.bot_id=%s AND st.turn_id=%s AND s.bot_id=st.bot_id
-            AND s.content_deleted_at IS NULL
-            AND st.summary_id IN (s.id,s.first_summary_id,s.second_summary_id,s.third_summary_id)""",
-            (timestamp, self.space_id, turn_id),
-        )
-
     @staticmethod
     def _discard(c, space, ids, timestamp):
         if not ids:
             return
-        c.execute(
-            """UPDATE memory_core.conversation_messages SET content_parts=NULL,image_descriptions=NULL,
-            match_fingerprint=NULL,content_deleted_at=%s WHERE bot_id=%s AND turn_id=ANY(%s)""",
-            (timestamp, space, ids),
-        )
+        clear_turn_contents(c, space, ids, timestamp, schema_version=HOOK_VERSION)
         c.execute(
             """UPDATE memory_core.conversation_requests SET state='interrupted',error_stage='hook',
             error_code='hook_turn_expired',finished_at=%s WHERE bot_id=%s AND turn_id=ANY(%s)""",
             (timestamp, space, ids),
         )
         c.execute(
-            """UPDATE memory_core.conversation_turns SET generation_state='incomplete',finished_at=%s,
-            content_deleted_at=%s,context_manifest='{}',recall_snapshot='{"status":"expired","cards":[]}'
+            """UPDATE memory_core.conversation_turns SET generation_state='incomplete',finished_at=%s
             WHERE bot_id=%s AND id=ANY(%s)""",
-            (timestamp, timestamp, space, ids),
+            (timestamp, space, ids),
         )
 
     @classmethod

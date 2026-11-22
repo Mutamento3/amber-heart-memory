@@ -316,6 +316,30 @@ dialog p { margin-top: 12px; }
 .conversation-day > h2 { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
 .conversation-day > h2::before, .conversation-day > h2::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .conversation-turn { display: grid; gap: 10px; padding: 14px 0; }
+[data-current-page="conversations"] .pagehead { position: sticky; top: var(--safe-top); z-index: 4; background: var(--paper); }
+.conversation-delete-toggle { margin-inline-start: auto; min-height: 40px; }
+#main.conversation-selecting { padding-bottom: 80px; }
+.conversation-selecting .conversation-turn { position: relative; padding-inline-start: 44px; }
+.conversation-select { display: none; }
+.conversation-selecting .conversation-select {
+  display: grid; place-items: center; position: absolute; inset-inline-start: 0; top: 12px;
+  padding: 0; width: 44px; min-height: 44px; background: transparent; border-color: transparent;
+}
+.conversation-selecting .conversation-turn, .conversation-select { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.conversation-select::before { content: ""; box-sizing: border-box; width: 20px; height: 20px; border: 1.5px solid var(--focus); border-radius: 50%; }
+.conversation-select[aria-pressed="true"]::before { background: var(--focus); }
+/* Drawn with borders: the page's CSP does not allow data: images. */
+.conversation-select[aria-pressed="true"]::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 10px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: translate(-50%, -60%) rotate(45deg);
+}
+.conversation-delete-bar:not([hidden]) {
+  position: fixed; z-index: 4; inset-inline: 0; bottom: calc(var(--nav-height, 0px) + var(--safe-bottom));
+  display: flex; justify-content: center; gap: 12px; padding: 8px 16px;
+  border-top: 1px solid var(--line); background: var(--paper);
+}
+.conversation-delete-bar button { min-height: 44px; }
+#delete-conversations-dialog .actions { justify-content: flex-end; margin-top: 16px; }
 .conversation-message { justify-self: start; width: fit-content; max-width: min(88%, 620px); min-width: 0; }
 .conversation-message.user { justify-self: end; }
 .conversation-heading { display: flex; align-items: baseline; gap: 8px; margin: 0 3px 3px; font-size: 11px; color: var(--muted); }

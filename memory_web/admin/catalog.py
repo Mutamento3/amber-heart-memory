@@ -466,7 +466,8 @@ class Catalog:
         with connect(self.dsn) as c:
             turn = c.execute(
                 """SELECT recall_snapshot,context_manifest FROM memory_core.conversation_turns
-                WHERE bot_id=%s AND id=%s AND history_state='current'""",
+                WHERE bot_id=%s AND id=%s AND history_state='current'
+                AND NOT (context_manifest ? 'deleted_fingerprints')""",
                 (space, identifier),
             ).fetchone()
             if not turn:

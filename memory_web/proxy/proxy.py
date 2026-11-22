@@ -34,11 +34,22 @@ MAX_PENDING_EVENTS = 4096
 BOUNDARY = re.compile(br'\r\n\r\n|\n\n|\r\r')
 
 
-# Automatic title requests of the recommended apps; never stored as chat.
-# Kelivo puts its fixed English prompt in the user message; Operit sends a
-# fixed system prompt (Chinese or English UI) before the first user message.
+# Background tasks of the recommended apps (titles, Operit's own memory,
+# summaries...); forwarded untouched and never stored as chat, otherwise they
+# would enter the history of every later turn. Kelivo puts its fixed English
+# title prompt in the user message; Operit sends fixed system prompts
+# (Chinese or English UI) from FunctionalPrompts.kt.
 CLIENT_TITLE_PREFIXES = ('I will give you some dialogue content',)
-CLIENT_TITLE_SYSTEM_PREFIXES = ('你负责生成简短的对话标题。', 'You generate short conversation titles.')
+CLIENT_TASK_SYSTEM_PREFIXES = (
+    '你负责生成简短的对话标题。', 'You generate short conversation titles.',
+    '你要从对话中构建长期记忆图谱。', 'You are building a long-term memory graph from this conversation.',
+    '你是知识分类专家。', 'You are a knowledge classification expert.',
+    '你是负责生成对话摘要的AI助手。', 'You are an AI assistant responsible for generating a conversation summary.',
+    '你是一个专业的技术文档撰写助手，擅长为软件工具包编写简洁清晰的功能描述。',
+    'You are a professional technical writer who excels at crafting concise and clear descriptions for software toolkits.',
+    '你是一个专业的翻译助手，',
+    '你是"角色卡生成助手"', 'You are a "Character Card Generation Assistant"',
+)
 
 
 def message_text(message):
@@ -48,14 +59,15 @@ def message_text(message):
     return content.strip() if isinstance(content, str) else ''
 
 
-def client_title_request(messages):
+def client_task_request(messages):
     last = messages[-1]
     if last.get('role') != 'user':
         return False
     if message_text(last).startswith(CLIENT_TITLE_PREFIXES):
         return True
     first = messages[0]
-    return first.get('role') == 'system' and message_text(first).startswith(CLIENT_TITLE_SYSTEM_PREFIXES)
+    # Operit's raw Kotlin strings keep \" literally in the character-card prompt.
+    return first.get('role') == 'system' and message_text(first).replace('\\"', '"').startswith(CLIENT_TASK_SYSTEM_PREFIXES)
 
 
 def error_response(status, code, message, **details):
@@ -468,7 +480,7 @@ class ProxyService:
                     or not isinstance(function.get('name'), str) or not 1 <= len(function['name']) <= 256
                     or not isinstance(function.get('arguments'), str)):
                     raise ValueError('工具调用格式无效')
-        if intent.get('operation') is None and client_title_request(messages):
+        if intent.get('operation') is None and client_task_request(messages):
             # Forward untouched: no memory injection, no stored turn, no extraction.
             intent['operation'] = 'non_chat'
         return body, intent

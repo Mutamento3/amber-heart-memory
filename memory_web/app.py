@@ -2,6 +2,7 @@
 
 import hmac
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Annotated, Literal
@@ -44,6 +45,7 @@ from memory_core.storage.schema import (
 )
 from memory_core.storage.config import Settings as CoreSettings
 from memory_core.daily.diaries import DiaryConflict, DiaryStore
+from memory_core.conversations.conversations import ConversationConflict, ConversationStore
 from memory_core.models.http_models import HTTPRecallModels
 from memory_core.cards.review import ReviewStore
 from memory_core.storage.space import (
@@ -144,6 +146,10 @@ class PeriodNotesPatch(Body):
 class DiaryPatch(Body):
     expected_revision: Annotated[StrictInt, Field(gt=0)]
     content: Annotated[StrictStr, Field(min_length=1, max_length=100000)]
+
+
+class DeleteConversations(Body):
+    position_ids: list[Annotated[StrictInt, Field(gt=0, lt=2**63)]] = Field(min_length=1)
 
 
 PositiveID = Annotated[int, Field(gt=0)]
@@ -423,7 +429,7 @@ def create_app(
             token,
             httponly=True,
             secure=settings.secure,
-            samesite="strict",
+            samesite="lax",
             path="/",
             max_age=lifetime if body.remember else None,
         )
@@ -445,7 +451,7 @@ def create_app(
             path="/",
             secure=settings.secure,
             httponly=True,
-            samesite="strict",
+            samesite="lax",
         )
         return response
 
@@ -558,6 +564,20 @@ def create_app(
     def conversation_recall(space: str, turn_id: PositiveID):
         require_space(space)
         return catalog.conversation_recall(space, turn_id)
+
+    @app.post("/api/spaces/{space}/conversations/delete")
+    async def delete_conversations(space: str, body: DeleteConversations):
+        await run_in_threadpool(require_space, space)
+        store = await run_in_threadpool(ConversationStore, settings.dsn, space)
+        try:
+            deleted, days = await run_in_threadpool(
+                store.delete_positions, body.position_ids, now=datetime.now(timezone.utc)
+            )
+        except ConversationConflict as exc:
+            raise HTTPException(404 if exc.code == "turn_missing" else 409, str(exc)) from None
+        for day in days:
+            app.state.proxy.summaries.schedule(space, rebuild_day=day)
+        return {"deleted": deleted}
 
     @app.get("/api/spaces/{space}/summaries")
     def summaries(space: str, page: Page = 1, size: Size = 20):

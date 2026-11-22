@@ -44,7 +44,7 @@ The screenshots show synthetic demo data.
 | Overview (概览) | See how many days you have been together, what needs your attention and how memories spread across topics; open the diary, same-day summaries, core memory or memory bookmarks |
 | Review (待审核) | New cards extracted each night and each month's topic summaries land here first: look through them one by one, edit them, then approve or reject; rejected ones can still be found and reviewed again |
 | Memories (记忆) | Search and filter all memory cards, restore archived cards with one tap; for a topic summary, see which cards it absorbed, or undo the whole summary |
-| Recall (召回) | See the original chat messages, tool calls and the memories recalled in each turn |
+| Recall (召回) | See chat messages, tool calls, and recalled memories. Select turns to remove them from the AI’s recent chat context. |
 | Diary, same-day summaries (日记、及时摘要) | From the overview, read and edit diary entries, and view same-day summaries and the conversations they cover |
 | Core memory, memory bookmarks (核心记忆、记忆书签) | From the overview, edit core memory, withdraw newly saved bookmarks, or edit and tidy existing ones |
 | Import (导入) | Upload old chat logs or memory files, preview before starting, and follow the progress at any time (opened from the Settings page) |

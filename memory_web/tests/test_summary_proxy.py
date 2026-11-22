@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
+from memory_core.daily.summaries import active_summaries
+from memory_core.daily.summary_policy import SummarySettings
 from memory_core.storage.install import install
 from memory_core.storage.space import SpaceConfiguration, Participant
 from memory_core.tests.support import DatabaseTestCase
@@ -247,6 +249,40 @@ class SummaryProxyTests(DatabaseTestCase):
             self.http.get("/api/spaces/two/summaries/" + str(identifier)).status_code,
             400,
         )
+
+    def test_delete_invalidates_rollup_and_rebuilds_summary_from_surviving_turns(self):
+        self.application.state.proxy.summaries.policy = SummarySettings(
+            trigger_messages=6, retain_turns=1, rollup_trigger=3
+        )
+        turns = []
+        for i in range(1, 8):
+            response = self.chat(f"合成第{i}轮原话")
+            self.assertEqual(response.status_code, 200, response.text)
+            turns.append(int(response.headers["x-memory-turn-id"]))
+        with connect(self.app) as c:
+            rollup = c.execute("SELECT id,business_date FROM memory_core.conversation_summaries WHERE level=2").fetchone()
+            active = active_summaries(c, "one", rollup["business_date"])
+        self.assertEqual([summary["id"] for summary in active], [rollup["id"]])
+        csrf = self.http.post("/api/login", headers={"Origin": ORIGIN},
+                              json={"password": "synthetic admin"}).json()["csrf"]
+        response = self.http.post("/api/spaces/one/conversations/delete",
+                                  headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+                                  json={"position_ids": [turns[2]]})
+        self.assertEqual(response.json(), {"deleted": 1})
+        self.http.portal.call(self.application.state.proxy.drain)
+        with connect(self.app) as c:
+            expired = c.execute("SELECT content,content_deleted_at FROM memory_core.conversation_summaries WHERE id=%s",
+                                (rollup["id"],)).fetchone()
+            active = active_summaries(c, "one", rollup["business_date"])
+        self.assertIsNone(expired["content"])
+        self.assertIsNotNone(expired["content_deleted_at"])
+        self.assertCountEqual([turn_id for summary in active for turn_id in summary["covered_turn_ids"]],
+                              [turns[0], turns[1], turns[3], turns[4], turns[5]])
+        self.assertIn("合成第4轮原话", self.summary.calls[-1][1])
+        self.assertNotIn("合成第3轮原话", self.summary.calls[-1][1])
+        self.chat("删除后继续说话")
+        sent = str(self.fake.requests[-1]["body"]["messages"])
+        self.assertNotIn("合成第3轮原话", sent)
 
     def test_configured_default_http_summary_adapter_only_calls_fake_upstream(self):
         from dataclasses import replace

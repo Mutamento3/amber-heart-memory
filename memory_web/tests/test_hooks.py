@@ -262,6 +262,26 @@ class HookTests(DatabaseTestCase):
             snapshot = c.execute("SELECT recall_snapshot FROM memory_core.conversation_turns").fetchone()
         self.assertEqual(snapshot["recall_snapshot"]["status"], "timeout")
 
+    def test_admin_deletes_hook_position_and_replay_cannot_recreate_it(self):
+        self.prompt(1, message="合成已删除的问题")
+        first = self.stop(1, "合成旧回复")
+        latest = self.stop(1, "合成替换回复")
+        self.assertTrue(latest["replaced"])
+        response = self.http.post("/api/login", headers={"Origin": ORIGIN}, json={"password": "synthetic admin"})
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": response.json()["csrf"]}
+        listing = self.http.get("/api/spaces/one/conversations").json()
+        self.assertEqual(listing["items"][0]["id"], latest["turn_id"])
+        response = self.http.post("/api/spaces/one/conversations/delete",
+                                  headers=headers, json={"position_ids": [listing["items"][0]["position_id"]]})
+        self.assertEqual(response.json(), {"deleted": 1})
+        self.assertEqual(self.http.get("/api/spaces/one/conversations").json()["items"], [])
+        self.post("stop", {"turn_id": 1, "reply": "迟到的替换回复"}, status=404)
+        self.post("user-prompt-submit", {"turn_id": 1, "message": "合成已删除的问题"}, status=409)
+        with connect(self.app) as c:
+            rows = c.execute("SELECT id,content_deleted_at FROM memory_core.conversation_turns ORDER BY id").fetchall()
+        self.assertEqual([row["id"] for row in rows], [first["turn_id"], latest["turn_id"]])
+        self.assertTrue(all(row["content_deleted_at"] for row in rows))
+
     def test_claude_pins_prompt_id_and_legacy_sessions_use_latest_prompt(self):
         self.claude("user-prompt-submit", prompt_id="first", prompt="有编号的第一句")
         self.claude("user-prompt-submit", prompt_id="second", prompt="有编号的第二句")

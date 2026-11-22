@@ -62,7 +62,7 @@ def active_summaries(connection, space, day):
             )
             merged.update(ids)
     output += [row for key, row in leaves.items() if key not in merged]
-    return sorted(output, key=lambda row: row["first_summary_id"] or row["id"])
+    return sorted(output, key=lambda row: (datetime.fromisoformat(row["start_at"]), row["id"]))
 
 
 def uncovered_turns(connection, space, day):
@@ -94,7 +94,20 @@ class SummaryStore(ConversationStore):
     def _input(self, connection, turns, policy):
         return dialogue_input(connection, self.space_id, turns, policy, self.settings)
 
-    def next_plan(self, day):
+    def _rollup_batch(self, c, day):
+        leaves = c.execute(
+            """SELECT s.*,EXISTS (SELECT 1 FROM memory_core.conversation_summaries previous
+                WHERE previous.bot_id=s.bot_id AND previous.first_summary_id=s.id) AS was_first
+            FROM memory_core.conversation_summaries s WHERE s.bot_id=%s AND s.business_date=%s
+            AND s.level=1 AND s.merged_into_id IS NULL AND s.content_deleted_at IS NULL ORDER BY s.id""",
+            (self.space_id, day),
+        ).fetchall()
+        # A deleted rollup still owns its first-summary key. Its surviving
+        # leaves can be read immediately and join a later batch with a new key.
+        start = next((i for i, leaf in enumerate(leaves) if not leaf["was_first"]), len(leaves))
+        return leaves[start:start + 3] if len(leaves) - start >= self.summary_settings.rollup_trigger else []
+
+    def next_plan(self, day, *, rebuild=False):
         with connect(self.dsn) as c:
             policy = read_policy(c, self.space_id)
             revision = c.execute(
@@ -102,11 +115,6 @@ class SummaryStore(ConversationStore):
                 (self.space_id,),
             ).fetchone()
             revision = revision["history_revision"] if revision else 0
-            leaves = c.execute(
-                """SELECT * FROM memory_core.conversation_summaries WHERE bot_id=%s AND business_date=%s
-                AND level=1 AND merged_into_id IS NULL AND content_deleted_at IS NULL ORDER BY id""",
-                (self.space_id, day),
-            ).fetchall()
             common = dict(
                 day=day, source_revision=revision, policy_revision=policy["revision"]
             )
@@ -114,8 +122,9 @@ class SummaryStore(ConversationStore):
                 user_name=policy["participants"]["user"]["name"],
                 assistant_name=policy["participants"]["assistant"]["name"],
             )
-            if len(leaves) >= self.summary_settings.rollup_trigger:
-                batch = leaves[:3]
+            batch = self._rollup_batch(c, day)
+            if batch:
+                chronological = sorted(batch, key=lambda s: datetime.fromisoformat(s["start_at"]))
                 material = "\n\n".join(
                     text.SUMMARY_SOURCE.format(
                         number=i + 1,
@@ -123,7 +132,7 @@ class SummaryStore(ConversationStore):
                         end=s["end_at"],
                         content=s["content"],
                     )
-                    for i, s in enumerate(batch)
+                    for i, s in enumerate(chronological)
                 )
                 return dict(
                     common,
@@ -132,13 +141,17 @@ class SummaryStore(ConversationStore):
                     source_digest=fingerprint(batch),
                     prompt=text.SUMMARY_ROLLUP_PROMPT.format(**names),
                     material=text.ROLLUP_MATERIAL.format(summaries=material),
-                    start_at=batch[0]["start_at"],
-                    end_at=batch[-1]["end_at"],
+                    start_at=chronological[0]["start_at"],
+                    end_at=max((s["end_at"] for s in batch), key=datetime.fromisoformat),
                 )
             turns = uncovered_turns(c, self.space_id, day)
             dialogue, _, groups = self._input(c, turns, policy)
             chars = sum(len(m["content"]) for g in groups for m in g["messages"])
             batch = summary_batch(turns, self.summary_settings, characters=chars)
+            if not batch and rebuild:
+                # A deleted turn can take a previously summarized batch below
+                # the usual trigger. Keep the same recent-turn reserve.
+                batch = turns[:-self.summary_settings.retain_turns]
             if not batch:
                 return None
             dialogue, digest, _ = self._input(c, batch, policy)
@@ -190,16 +203,8 @@ class SummaryStore(ConversationStore):
                     return None
                 sources = [None, None, None]
             else:
-                batch = c.execute(
-                    """SELECT * FROM memory_core.conversation_summaries WHERE bot_id=%s AND business_date=%s
-                    AND level=1 AND merged_into_id IS NULL AND content_deleted_at IS NULL ORDER BY id FOR UPDATE""",
-                    (self.space_id, plan["day"]),
-                ).fetchall()
-                if (
-                    len(batch) < self.summary_settings.rollup_trigger
-                    or [s["id"] for s in batch[:3]] != ids
-                    or fingerprint(batch[:3]) != plan["source_digest"]
-                ):
+                batch = self._rollup_batch(c, plan["day"])
+                if [s["id"] for s in batch] != ids or fingerprint(batch) != plan["source_digest"]:
                     return None
                 sources = ids
             row = c.execute(
@@ -225,8 +230,12 @@ class SummaryStore(ConversationStore):
             if plan["level"] == 1:
                 for identifier in ids:
                     c.execute(
-                        """INSERT INTO memory_core.conversation_summary_turns(summary_id,bot_id,business_date,turn_id)
-                        VALUES (%s,%s,%s,%s)""",
+                        """INSERT INTO memory_core.conversation_summary_turns AS coverage
+                            (summary_id,bot_id,business_date,turn_id) VALUES (%s,%s,%s,%s)
+                        ON CONFLICT (bot_id,turn_id) DO UPDATE SET summary_id=EXCLUDED.summary_id
+                        WHERE EXISTS (SELECT 1 FROM memory_core.conversation_summaries previous
+                            WHERE previous.id=coverage.summary_id AND previous.bot_id=coverage.bot_id
+                            AND previous.content_deleted_at IS NOT NULL)""",
                         (row["id"], self.space_id, plan["day"], identifier),
                     )
             else:

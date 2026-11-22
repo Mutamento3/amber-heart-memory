@@ -310,6 +310,55 @@ def conversation_scrollback(page):
     page.unroute(listing, fulfil)
 
 
+def conversation_delete(page):
+    """Select and remove two real preview turns with the iPhone layout."""
+    page.goto(ORIGIN + "/conversations")
+    toggle = page.get_by_role("button", name="删除", exact=True)
+    expect(toggle).to_be_visible()
+    list_area = page.locator(".conversation-list")
+    first = list_area.locator(".conversation-turn").filter(has_text="窗边的绿植该浇水了吗？")
+    second = list_area.locator(".conversation-turn").filter(has_text="帮我写一句给自己的鼓励。")
+    circles = list_area.locator(".conversation-select")
+    expect(circles.first).not_to_be_visible()
+    toggle.click()
+    bar = page.locator(".conversation-delete-bar")
+    one = first.locator(".conversation-select")
+    two = second.locator(".conversation-select")
+    expect(bar.get_by_role("button", name="删除 0 轮")).to_be_disabled()
+    expect(one).to_have_attribute("aria-pressed", "false")
+    one.click()
+    two.click()
+    expect(one).to_have_attribute("aria-pressed", "true")
+    expect(bar.get_by_role("button", name="删除 2 轮")).to_be_enabled()
+    assert one.bounding_box()["width"] >= 44
+    assert bar.bounding_box()["y"] + bar.bounding_box()["height"] <= page.locator(".topbar nav").bounding_box()["y"] + 1
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    one.click()
+    expect(bar.get_by_role("button", name="删除 1 轮")).to_be_enabled()
+    bar.get_by_role("button", name="取消", exact=True).click()
+    expect(circles.first).not_to_be_visible()
+    toggle.click()
+    one.click()
+    two.click()
+    remove = bar.get_by_role("button", name="删除 2 轮")
+    remove.click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_contain_text(
+        "删除这 2 轮聊天？TA 不会再看到它们，相关的及时摘要会重新写。"
+        "已经整理成记忆卡片或写进日记的内容不会跟着删，请到待审核或记忆里检查。"
+    )
+    dialog.get_by_role("button", name="取消", exact=True).click()
+    expect(remove).to_be_enabled()
+    remove.click()
+    with page.expect_response(lambda response: response.url.endswith("/conversations/delete")) as result:
+        dialog.get_by_role("button", name="删除 2 轮", exact=True).click()
+    assert result.value.json() == {"deleted": 2}
+    expect(dialog).not_to_be_visible()
+    expect(first).to_have_count(0)
+    expect(second).to_have_count(0)
+    expect(list_area).to_contain_text("接着聊接下来的计划。")
+
+
 def hosted_pages(page, capture):
     expect(page.locator('.conversation-entry')).to_have_count(0)
     recall_link = page.locator('.today .recall-overview a')
@@ -1509,6 +1558,7 @@ def main():
         settings_unsaved_edits(page)
         hosted_pages(page, capture)
         conversation_scrollback(page)
+        conversation_delete(page)
         page.get_by_role("link", name="设置", exact=True).click()
         persona_imports(page)
         diary_pages(page, capture)

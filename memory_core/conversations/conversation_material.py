@@ -19,7 +19,8 @@ def finished_day(connection, space, day, settings, now, purpose):
         return dict(status="retry", reason=purpose + "_day_not_finished")
     turns = connection.execute(
         """SELECT * FROM memory_core.conversation_turns
-        WHERE bot_id=%s AND business_date=%s AND history_state='current' ORDER BY position_id""",
+        WHERE bot_id=%s AND business_date=%s AND history_state='current'
+        AND NOT (context_manifest ? 'deleted_fingerprints') ORDER BY position_id""",
         (space, day),
     ).fetchall()
     if not turns:

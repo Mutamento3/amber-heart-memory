@@ -121,7 +121,7 @@ class AdminTests(DatabaseTestCase):
         for flag in (
             "HttpOnly",
             "Secure",
-            "SameSite=strict",
+            "SameSite=lax",
             "Max-Age=2592000",
             "Path=/",
         ):

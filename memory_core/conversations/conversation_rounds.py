@@ -129,22 +129,67 @@ class ConversationRounds:
             (self.space_id,),
         ).fetchone()
 
+    def _same_user(self, c, turn_id, parts):
+        row = c.execute(
+            """SELECT content_parts FROM memory_core.conversation_messages
+            WHERE turn_id=%s AND bot_id=%s AND role='user' AND event_index=0""",
+            (turn_id, self.space_id),
+        ).fetchone()
+        return row is not None and row["content_parts"] == parts
+
+    def _deleted_prompt(self, c, target, latest, anchor_id, anchor_kind, parts):
+        if target is not None:
+            return c.execute(
+                """SELECT 1 FROM memory_core.conversation_turns
+                WHERE bot_id=%s AND id=%s AND context_manifest ? 'deleted_fingerprints'""",
+                (self.space_id, target),
+            ).fetchone() is not None
+        # An exact retry of a surviving turn still takes precedence.
+        if (latest and latest["anchor_message_id"] == anchor_id and latest["anchor_kind"] == anchor_kind
+                and self._same_user(c, latest["id"], parts)):
+            return False
+        proxy_only = " AND t.hook_session IS NULL" if self.schema_version >= HOOK_VERSION else ""
+        return c.execute(
+            """SELECT 1 FROM memory_core.conversation_turns t
+            JOIN memory_core.conversation_messages m ON (m.turn_id,m.bot_id)=(t.id,t.bot_id)
+            WHERE t.bot_id=%s AND t.content_deleted_at IS NOT NULL AND m.role='user' AND m.event_index=0
+            AND t.context_manifest->'deleted_fingerprints'->>m.id::text=%s
+            AND t.anchor_message_id IS NOT DISTINCT FROM %s AND t.anchor_kind=%s"""
+            + proxy_only + " LIMIT 1",
+            (self.space_id, fingerprint(parts), anchor_id, anchor_kind),
+        ).fetchone() is not None
+
     def _classify(self, c, body, intent, user_index, latest):
         anchor_id, anchor_kind = None, "absent"
         prefix = body["messages"][:user_index]
+        proxy_only = " AND t.hook_session IS NULL" if self.schema_version >= HOOK_VERSION else ""
         if prefix and prefix[-1]["role"] == "assistant":
             digest = fingerprint(content_parts(prefix[-1].get("content")))
+            previous_user = next((m for m in reversed(prefix) if m["role"] == "user"), None)
+            user_digest = fingerprint(content_parts(previous_user.get("content"))) if previous_user else None
+            # A removed reply can still delimit a client request. Prefer the
+            # matching user/reply pair when several rounds said the same thing.
             anchor = c.execute(
-                """SELECT m.id FROM memory_core.conversation_messages m JOIN memory_core.conversation_turns t ON (t.id,t.bot_id)=(m.turn_id,m.bot_id)
-                WHERE m.bot_id=%s AND m.role='assistant' AND m.match_fingerprint=%s AND t.history_state='current' AND t.content_deleted_at IS NULL
-                ORDER BY t.position_id DESC,m.event_index DESC LIMIT 1""",
-                (self.space_id, digest),
+                """SELECT m.id FROM memory_core.conversation_messages m
+                JOIN memory_core.conversation_turns t ON (t.id,t.bot_id)=(m.turn_id,m.bot_id)
+                LEFT JOIN memory_core.conversation_messages u ON (u.turn_id,u.bot_id)=(t.id,t.bot_id)
+                    AND u.role='user' AND u.event_index=0
+                WHERE m.bot_id=%s AND m.role='assistant'
+                AND ((m.match_fingerprint=%s AND t.history_state='current' AND t.content_deleted_at IS NULL)
+                    OR (t.content_deleted_at IS NOT NULL AND t.context_manifest->'deleted_fingerprints'->>m.id::text=%s))"""
+                + proxy_only + """
+                ORDER BY (COALESCE(u.match_fingerprint,t.context_manifest->'deleted_fingerprints'->>u.id::text)=%s)
+                    DESC NULLS LAST, t.position_id DESC,t.id DESC,m.event_index DESC LIMIT 1""",
+                (self.space_id, digest, digest, user_digest),
             ).fetchone()
             anchor_id = anchor["id"] if anchor else None
             anchor_kind = "matched" if anchor else "unmatched"
         elif any(m["role"] == "assistant" for m in prefix):
             anchor_kind = "unmatched"
         operation, target = intent.get("operation"), intent.get("target_turn_id")
+        parts = content_parts(body["messages"][user_index].get("content"))
+        if operation != "new" and self._deleted_prompt(c, target, latest, anchor_id, anchor_kind, parts):
+            raise ValueError("这轮聊天已删除，请发送一条新消息")
         if operation:
             if operation == "new":
                 if target is not None:
@@ -165,19 +210,12 @@ class ConversationRounds:
             if operation == "retry" and source["generation_state"] not in ("failed", "incomplete"):
                 raise ConversationConflict("这一轮已完成；需要新回复请使用重新生成")
             if operation in ("retry", "regenerate"):
-                old = c.execute(
-                    "SELECT content_parts FROM memory_core.conversation_messages WHERE turn_id=%s AND bot_id=%s AND role='user' ORDER BY event_index LIMIT 1",
-                    (source["id"], self.space_id),
-                ).fetchone()
-                if not old or old["content_parts"] != content_parts(
-                    body["messages"][user_index].get("content")
-                ):
+                if not self._same_user(c, source["id"], parts):
                     raise ConversationConflict("重新生成或重试须使用原用户消息，改写请使用 edit")
             return operation, latest, source["anchor_message_id"], source["anchor_kind"]
         if target is not None:
             raise ConversationConflict("指定目标轮次时须明确操作类型")
         if latest:
-            proxy_only = " AND t.hook_session IS NULL" if self.schema_version >= HOOK_VERSION else ""
             newest = c.execute(
                 """SELECT m.id,m.turn_id FROM memory_core.conversation_messages m JOIN memory_core.conversation_turns t ON (t.id,t.bot_id)=(m.turn_id,m.bot_id)
                 WHERE m.bot_id=%s AND m.role='assistant' AND t.history_state='current' AND t.content_deleted_at IS NULL
@@ -198,30 +236,17 @@ class ConversationRounds:
                 if any(m["role"] == "user" for m in prefix[last_assistant + 1:]):
                     return "new", None, anchor_id, anchor_kind
                 if anchor_id is not None and anchor_id == latest["anchor_message_id"]:
-                    old = c.execute(
-                        "SELECT content_parts FROM memory_core.conversation_messages WHERE turn_id=%s AND bot_id=%s AND role='user' ORDER BY event_index LIMIT 1",
-                        (latest["id"], self.space_id),
-                    ).fetchone()
-                    same_message = old and old["content_parts"] == content_parts(
-                        body["messages"][user_index].get("content")
-                    )
-                    operation = "regenerate" if same_message else "edit"
+                    operation = "regenerate" if self._same_user(c, latest["id"], parts) else "edit"
                     return operation, latest, anchor_id, anchor_kind
             if anchor_id is not None and newest and anchor_id == newest["id"]:
                 return "new", None, anchor_id, anchor_kind
             if anchor_id is not None and anchor_id == latest["anchor_message_id"]:
                 return "edit", latest, anchor_id, anchor_kind
             if anchor_kind == "absent":
-                parts = content_parts(body["messages"][user_index].get("content"))
-                old = c.execute(
-                    "SELECT content_parts FROM memory_core.conversation_messages WHERE turn_id=%s AND bot_id=%s AND role='user' ORDER BY event_index LIMIT 1",
-                    (latest["id"], self.space_id),
-                ).fetchone()
                 if (
                     parts
                     and all(p["type"] == "text" for p in parts)
-                    and old
-                    and parts == old["content_parts"]
+                    and self._same_user(c, latest["id"], parts)
                 ):
                     return "regenerate", latest, None, "absent"
         return "new", None, anchor_id, anchor_kind

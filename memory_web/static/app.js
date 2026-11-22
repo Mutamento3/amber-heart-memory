@@ -104,6 +104,7 @@ const affectedPages = {
   "topic-summaries": reviewPages,
   cards: reviewPages,
   diaries: ["diaries", "overview"],
+  conversations: ["conversations", "summaries", "overview", ...reviewPages],
   "recent-notes": ["bookmarks", "overview"],
   bookmarks: ["bookmarks", "overview"],
   imports: ["imports", ...reviewPages],
@@ -531,7 +532,9 @@ function shell() {
   const back = FROM_OVERVIEW.includes(page)
     ? `<a class="back-arrow" href="${pageURL("overview")}" data-go="overview" aria-label="返回概览">‹</a>`
     : "";
-  root.innerHTML = `<div class="shell" data-current-page="${page}"><header class="topbar"><a class="brand" href="${appPath("/overview")}">${brandHTML()}</a><nav aria-label="功能页"></nav></header><header class="pagehead"><p class="eyebrow">${esc(eyebrow)}</p><div class="heading-row">${back}<h1 id="page-title">${esc(heading)}</h1></div></header><main id="main" aria-labelledby="page-title"></main><footer>Amber Heart · 琥珀之心${state.fixed ? " · 当前使用固定假响应，仅供合成材料验收" : ""}</footer></div>`;
+  const action = page === "conversations"
+    ? '<button type="button" class="quiet conversation-delete-toggle" hidden>删除</button>' : "";
+  root.innerHTML = `<div class="shell" data-current-page="${page}"><header class="topbar"><a class="brand" href="${appPath("/overview")}">${brandHTML()}</a><nav aria-label="功能页"></nav></header><header class="pagehead"><p class="eyebrow">${esc(eyebrow)}</p><div class="heading-row">${back}<h1 id="page-title">${esc(heading)}</h1>${action}</div></header><main id="main" aria-labelledby="page-title"></main><footer>Amber Heart · 琥珀之心${state.fixed ? " · 当前使用固定假响应，仅供合成材料验收" : ""}</footer></div>`;
   renderNavigation();
   wireGo($(".pagehead"));
   $(".brand").onclick = async (event) => {
@@ -663,7 +666,7 @@ function renderPage(main, page, epoch, view, read, fresh, keepView = () => {}) {
     case "overview": return overviewPage(main, epoch, read, fresh);
     case "review": return draftsPage(main, epoch, view.filter, read, fresh);
     case "memories": return memoryCardsPage(main, epoch, view, read, fresh);
-    case "conversations": return conversationsPage(main, epoch, read);
+    case "conversations": return conversationsPage(main, epoch, read, keepView);
     case "diaries": return diariesPage(main, epoch, read);
     case "summaries": return summariesPage(main, epoch, read);
     case "imports": return importsPage(main, deps);
@@ -841,7 +844,7 @@ const GUIDE_ROWS = [
   ["及时摘要", "当天聊得多了，把早些时候的聊天浓缩成摘要，聊得再久前面的事也不会忘。", "系统自动写，当天聊到一定长度就写一份。", "每轮都带当天的摘要。"],
   ["记忆卡片", "一件件具体的经历，长期保存。", "每天凌晨从前一天的聊天里抽出来，先进待审核，审过或到时间自动收录后入库。", "每轮自动召回和这轮聊天最相关的 5 张，不是全部都带。"],
 ];
-const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p>';
+const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p><p class="meta guide-note">最近的聊天原文也每轮都带，开新对话不会清空。想让 TA 忘掉某几轮，到“召回”页删除。</p>';
 function stored(key) {
   try { return localStorage.getItem(key); } catch { return "unavailable"; }
 }
@@ -966,7 +969,8 @@ function connectNotes(app) {
   return `<h3>注意</h3><ul>
 <li>${name} 里只填琥珀之心的访问钥匙。模型的 API Key 只在安装琥珀之心时填，不要直接填进 ${name}，否则聊天会绕过琥珀之心，既记不下来，也召回不了记忆。</li>
 <li>${own}都要关掉，记忆交给琥珀之心。</li>
-<li>琥珀之心填了人设，会替换 ${name} 里的${prompts}。</li></ul>
+<li>琥珀之心填了人设，会替换 ${name} 里的${prompts}。</li>
+<li>在 ${name} 里开新对话，琥珀之心记下的聊天不会清空，TA 仍记得最近聊过的内容。想让 TA 忘掉某几轮，到“召回”页点右上角的“删除”，勾选后删掉。</li></ul>
 <h3>连不上怎么办</h3><ul>
 <li>提示 401：访问钥匙没复制全，或者已经作废，回这里重新复制。</li>
 <li>提示 404：接口地址填错了，照上面复制的地址重新填。</li>
@@ -1607,9 +1611,11 @@ async function summariesPage(main, epoch, read) {
     `<details class="summary-day" ${index === 0 ? "open" : ""}><summary><span>${diaryDate(day)}</span></summary>${items.map((item) =>
       `<article class="summary-entry card"><h2 class="summary-when">${esc(time(item))}</h2><p class="summary-text">${esc(item.content || "")}</p></article>`).join("")}</details>`).join("")}<p class="muted summary-retention">只保留最近 15 天，更早的日子可以看日记。</p></section>`;
 }
-async function conversationsPage(main, epoch, read) {
+async function conversationsPage(main, epoch, read, keepView) {
   const status = {failed: "上游失败 · 未获回应", incomplete: "未完成", generating: "正在回复", waiting_tools: "等待工具"};
   const recallStatus = {ok: "召回完成", empty: "未召回卡片", failed: "召回失败，本轮未注入记忆", timeout: "召回超时，本轮未注入记忆", degraded: "召回已降级", skipped_image: "纯图片消息，跳过召回", expired: "原文已删除", not_run: "未记录召回"};
+  const toggle = $(".conversation-delete-toggle");
+  toggle.hidden = true;
   function turnHTML(turn) {
     const events = turn.messages.map((m, index) => {
       const ai = m.role === "assistant";
@@ -1624,7 +1630,9 @@ async function conversationsPage(main, epoch, read) {
       events.push({index: tool.event_index, html: `<p class="conversation-tool">${esc(tool.label)} · ${esc(tool.outcome)}</p>`});
     }
     events.sort((a, b) => a.index - b.index);
-    return `<article class="conversation-turn" data-turn="${turn.id}">${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
+    const active = ["pending", "generating", "waiting_tools"].includes(turn.generation_state);
+    const select = `<button type="button" class="conversation-select" data-position="${turn.position_id}" aria-label="选择聊天轮次 ${turn.position_id}" aria-pressed="false"${active ? " disabled" : ""}></button>`;
+    return `<article class="conversation-turn" data-turn="${turn.id}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
   }
   function daysHTML(items) {
     const days = new Map();
@@ -1664,8 +1672,72 @@ async function conversationsPage(main, epoch, read) {
     return;
   }
   // Like a chat window: open at the newest turn, load older turns when the reader scrolls up.
-  main.innerHTML = `<p class="conversation-more meta" role="status"></p><div class="conversation-list">${daysHTML(data.items)}</div>`;
+  main.innerHTML = `<p class="conversation-more meta" role="status"></p><div class="conversation-list">${daysHTML(data.items)}</div><div class="conversation-delete-bar" role="group" aria-label="所选聊天轮次" hidden><button type="button" class="danger conversation-delete-confirm" disabled>删除 0 轮</button><button type="button" class="quiet conversation-delete-cancel">取消</button></div>`;
   const list = $(".conversation-list", main), more = $(".conversation-more", main);
+  const bar = $(".conversation-delete-bar", main);
+  const remove = $(".conversation-delete-confirm", bar);
+  const selected = new Set();
+  const updateCount = () => {
+    remove.textContent = `删除 ${selected.size} 轮`;
+    remove.disabled = !selected.size;
+  };
+  toggle.hidden = false;
+  toggle.onclick = () => {
+    keepView();
+    toggle.hidden = true;
+    main.classList.add("conversation-selecting");
+    bar.hidden = false;
+  };
+  $(".conversation-delete-cancel", bar).onclick = () => {
+    selected.clear();
+    $$(".conversation-select[aria-pressed=true]", list).forEach(button => button.setAttribute("aria-pressed", "false"));
+    updateCount();
+    bar.hidden = true;
+    main.classList.remove("conversation-selecting");
+    toggle.hidden = false;
+    toggle.focus({preventScroll: true});
+  };
+  list.addEventListener("click", (event) => {
+    if (bar.hidden) return;
+    // While selecting, tapping anywhere on a round toggles it, except its own links and expanders.
+    const turn = event.target.closest(".conversation-turn");
+    if (!turn) return;
+    if (!event.target.closest(".conversation-select") && event.target.closest("a, summary, details, button, input, textarea")) return;
+    const button = $(".conversation-select", turn);
+    if (!button || button.disabled) return;
+    const position = Number(button.dataset.position);
+    if (selected.has(position)) selected.delete(position);
+    else selected.add(position);
+    button.setAttribute("aria-pressed", String(selected.has(position)));
+    updateCount();
+  });
+  remove.onclick = () => {
+    if ($("#delete-conversations-dialog")) return;
+    const positions = [...selected];
+    const [dialog, close] = popupDialog("delete-conversations-dialog", () => {});
+    dialog.setAttribute("aria-labelledby", "delete-conversations-warning");
+    dialog.innerHTML = `<form><p id="delete-conversations-warning">删除这 ${positions.length} 轮聊天？TA 不会再看到它们，相关的及时摘要会重新写。已经整理成记忆卡片或写进日记的内容不会跟着删，请到待审核或记忆里检查。</p><p class="error" role="alert"></p><div class="actions"><button class="primary" type="submit">删除 ${positions.length} 轮</button><button class="quiet" type="button">取消</button></div></form>`;
+    $("button[type=button]", dialog).onclick = close;
+    const form = $("form", dialog);
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const confirm = $("button[type=submit]", form);
+      if (confirm.disabled) return;
+      confirm.disabled = true;
+      try {
+        const result = await api(url("/conversations/delete"), {method: "POST", body: {position_ids: positions}});
+        if (dialog.isConnected) close();
+        if (epoch !== state.epoch || !main.isConnected) return;
+        await navigate("conversations", false);
+        message(`已删除 ${result.deleted} 轮聊天`);
+      } catch (error) {
+        if (dialog.isConnected) $(".error", dialog).textContent = error.message;
+      } finally {
+        confirm.disabled = false;
+      }
+    };
+    dialog.showModal();
+  };
   wireRecall(list);
   window.scrollTo(0, document.documentElement.scrollHeight);
   let before = data.has_more ? data.next_before : null, loading = false;

@@ -41,6 +41,7 @@ Leave other settings at their defaults.
 - In Operit, enter only Amber Heart's access key. Model API keys are entered only when installing Amber Heart; don't put them directly into Operit, or chats bypass Amber Heart and are neither recorded nor recalled.
 - Turn off Operit's own memory and conversation summaries, and leave memory to Amber Heart.
 - If Amber Heart has a persona, it replaces Operit's system prompt and character card.
+- Starting a new chat in Operit does not clear the chats Amber Heart has stored; your companion still remembers what you talked about recently. To make it forget some rounds, open the Recall page in the Amber Heart admin site, tap Delete in the top right and tick the rounds to remove.
 
 ## Can't connect?
 

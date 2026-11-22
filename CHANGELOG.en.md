@@ -4,6 +4,15 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.6.0 · 2026-11-22
+
+- New Operit import for both chat history and the memory library. Chats are grouped by character card for selection and use the reply version you picked in Operit; thinking and tool-call content is skipped, and images and files show as placeholder text. Only plain-text memory entries are imported, and they start unticked in the preview. Upload one JSON, both JSON files together, or a ZIP. See the [import guide](docs/import/operit.en.md).
+- Chats can now be deleted from the Recall page: tap "Delete" in the top right, tick the rounds and confirm. Your companion no longer sees deleted rounds, and affected instant summaries are rewritten from the remaining chat. Memory cards or diary entries already made from them are not removed; check Review or Memories for those. You can keep chatting in your app afterwards as usual.
+- Operit's background requests are no longer stored as chat: its own memory extraction and categorization, conversation summaries, MCP toolkit descriptions, translation and AI character-card generation are forwarded untouched, without memory and without being recorded. Before, if Operit's "auto-save memory" was left on, these requests ended up in the context of every later round.
+- The connection guides and memory explanation now say that starting a new chat in your app does not clear the chats Amber Heart has stored; your companion still remembers what you talked about recently.
+- Kelivo memory import dates: manually added and merged entries are now dated "unspecified" instead of using their creation date as the date things happened.
+- Fix: with "Remember this device" ticked, opening the admin site from a home-screen icon or another app still asked for the password every time. Log in once more after upgrading.
+
 ## v0.5.0 · 2026-11-22
 
 - New-version notice: when a feature release comes out, opening the admin overview pops up its release notes once, and a "New version" button stays in the top-right corner until you upgrade. Small fixes aren't announced. If the server can't reach GitHub nothing is shown; set `MEMORY_UPDATE_CHECK=false` in `.env` to turn the check off. The bottom of the Settings page shows the current version.

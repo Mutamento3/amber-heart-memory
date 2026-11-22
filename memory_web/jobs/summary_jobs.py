@@ -1,7 +1,7 @@
 """Nonblocking per-space scheduling, backed by a cross-worker database lock."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 
 import anyio
@@ -11,6 +11,7 @@ from memory_core.storage.clock import business_day_label
 from memory_core.storage.db import connect
 from memory_core.daily.summaries import SummaryStore
 from memory_core.daily.summary_policy import SummarySettings
+from memory_core.conversations.conversations import SUMMARY_RETENTION_DAYS
 from ..models.summary_model import SummaryModel
 
 LOG = logging.getLogger("memory_web.summary")
@@ -24,18 +25,24 @@ class SummaryJobs:
         self.tasks = {}
         self.pending = {}
 
-    def schedule(self, space, turn_id):
+    def schedule(self, space, turn_id=None, *, rebuild_day=None):
         if space in self.tasks:
-            self.pending[space] = turn_id
+            # Ordinary notifications coalesce. Each day affected by a
+            # deletion still needs its own pass through the summary store.
+            self.pending.setdefault(space, {})[rebuild_day] = turn_id
             return
-        task = asyncio.create_task(self.run(space, turn_id))
+        task = asyncio.create_task(self.run(space, turn_id, rebuild_day=rebuild_day))
         self.tasks[space] = task
 
         def finished(done):
             self.tasks.pop(space, None)
-            pending = self.pending.pop(space, None)
-            if pending is not None:
-                self.schedule(space, pending)
+            pending = self.pending.get(space)
+            if pending:
+                day = next(iter(pending))
+                identifier = pending.pop(day)
+                if not pending:
+                    self.pending.pop(space)
+                self.schedule(space, identifier, rebuild_day=day)
 
         task.add_done_callback(finished)
 
@@ -60,13 +67,21 @@ class SummaryJobs:
         ).isoformat()
         return turn["business_date"] if turn["business_date"] == today else None
 
-    async def run(self, space, turn_id):
+    async def run(self, space, turn_id, *, rebuild_day=None):
         manager = None
         try:
             store = await run_in_threadpool(
                 SummaryStore, self.settings.dsn, space, self.policy
             )
-            day = await run_in_threadpool(self._day, store, turn_id)
+            async def work_day():
+                if rebuild_day is None:
+                    return await run_in_threadpool(self._day, store, turn_id)
+                today = business_day_label(datetime.now(timezone.utc), store.settings)
+                if date.fromisoformat(rebuild_day) >= today - timedelta(days=SUMMARY_RETENTION_DAYS):
+                    return rebuild_day
+                return None
+
+            day = await work_day()
             if day is None:
                 return
             manager = store.job_lock()
@@ -74,7 +89,7 @@ class SummaryJobs:
             while not acquired:
                 await run_in_threadpool(manager.__exit__, None, None, None)
                 manager = None
-                if await run_in_threadpool(self._day, store, turn_id) != day:
+                if await work_day() != day:
                     return
                 # The other worker may have checked its last batch just before
                 # our reply committed. Recheck after it releases the lock so
@@ -82,8 +97,8 @@ class SummaryJobs:
                 await asyncio.sleep(0.2)
                 manager = store.job_lock()
                 acquired = await run_in_threadpool(manager.__enter__)
-            while await run_in_threadpool(self._day, store, turn_id) == day:
-                plan = await run_in_threadpool(store.next_plan, day)
+            while await work_day() == day:
+                plan = await run_in_threadpool(store.next_plan, day, rebuild=rebuild_day is not None)
                 if not plan:
                     return
                 result = await self.model.summarize(plan["prompt"], plan["material"])

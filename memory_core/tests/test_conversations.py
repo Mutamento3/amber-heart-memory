@@ -8,7 +8,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from memory_core.storage.config import Settings
-from memory_core.conversations.conversations import ConversationStore, DuplicateRequest
+from memory_core.conversations.conversations import ConversationConflict, ConversationStore, DuplicateRequest
+from memory_core.conversations.conversation_material import finished_day
 from memory_core.storage.db import connect
 from memory_core.storage.install import install, catalog_fingerprint, MIGRATIONS
 from memory_core.storage.space import SpaceConfiguration, Participant
@@ -146,3 +147,44 @@ class ConversationTests(DatabaseTestCase):
         with connect(self.app) as c:
             self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.conversation_messages').fetchone()['n'], 1)
             self.assertEqual(c.execute('SELECT error_code FROM memory_core.conversation_requests').fetchone()['error_code'], 'source_expired')
+
+    def test_manual_delete_clears_every_version_and_preserves_the_other_daily_input(self):
+        self.ready()
+        moment = datetime.fromisoformat('2026-10-01T10:00:00+08:00')
+        original = self.store.begin(BODY, {}, now=moment)
+        self.store.finish(original, content='已删除的旧版', finish_reason='tool_calls', now=moment,
+                          tools=[{'id': 'call1', 'function': {'name': 'synthetic', 'arguments': '{}'}}])
+        with self.assertRaisesRegex(ConversationConflict, '等待工具'):
+            self.store.delete_positions([original['turn_id']], now=moment)
+        moment += timedelta(minutes=6)
+        replacement = self.store.begin(BODY, {'operation': 'regenerate'}, now=moment)
+        self.store.finish(replacement, content='已删除的采用版本', finish_reason='stop', now=moment)
+        failed = self.store.begin(BODY, {'operation': 'regenerate'}, now=moment)
+        with self.assertRaisesRegex(ConversationConflict, '正在回复'):
+            self.store.delete_positions([original['turn_id']], now=moment)
+        self.store.finish(failed, content='已删除的失败候选', state='interrupted', now=moment)
+        keep = self.store.begin(BODY, {'operation': 'new'}, now=moment)
+        self.store.finish(keep, content='继续保留的回复', finish_reason='stop', now=moment)
+        with connect(self.app) as c:
+            rows = c.execute("SELECT id FROM memory_core.conversation_messages WHERE turn_id<>%s",
+                             (keep['turn_id'],)).fetchall()
+            segments = [{'segment_id': f'conversation-message:{row["id"]}', 'text': '合成原文副本'} for row in rows]
+            c.execute("""INSERT INTO memory_core.source_materials
+                (bot_id, source_key, content_sha256, business_date, source_kind, segments)
+                VALUES ('one','conversation:test','synthetic','2026-10-01','mainline',%s)""",
+                (Jsonb(segments),))
+        self.assertEqual(self.store.delete_positions([original['turn_id']], now=moment), (1, []))
+        self.assertEqual(self.store.delete_positions([original['turn_id']], now=moment), (0, []))
+        with connect(self.app) as c:
+            turns = c.execute("""SELECT id, content_deleted_at, frozen_context, recall_snapshot
+                FROM memory_core.conversation_turns WHERE position_id=%s""", (original['turn_id'],)).fetchall()
+            self.assertCountEqual([t['id'] for t in turns], [original['turn_id'], replacement['turn_id'], failed['turn_id']])
+            self.assertTrue(all(t['content_deleted_at'] and t['frozen_context'] is None
+                                and not t['recall_snapshot']['cards'] for t in turns))
+            erased = c.execute("""SELECT content_parts,match_fingerprint FROM memory_core.conversation_messages
+                WHERE turn_id=ANY(%s)""", ([t['id'] for t in turns],)).fetchall()
+            self.assertTrue(all(row == {'content_parts': None, 'match_fingerprint': None} for row in erased))
+            self.assertIsNone(c.execute('SELECT payload FROM memory_core.conversation_tool_events').fetchone()['payload'])
+            self.assertIsNone(c.execute('SELECT segments FROM memory_core.source_materials').fetchone()['segments'])
+            daily = finished_day(c, 'one', '2026-10-01', self.settings, moment + timedelta(days=1), 'diary')
+        self.assertEqual([turn['id'] for turn in daily['turns']], [keep['turn_id']])

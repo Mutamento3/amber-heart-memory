@@ -488,6 +488,83 @@ class HostedProxyTests(DatabaseTestCase):
         self.assertEqual(texts(older), ["第二轮"])
         self.assertFalse(older["has_more"])
 
+    def test_client_history_after_deleting_middle_latest_and_regenerating(self):
+        prefix = []
+
+        def send(question, reply, *, remember=True):
+            self.fake.reply = reply
+            user = {"role": "user", "content": question}
+            response = self.chat(messages=[*prefix, user])
+            self.assertEqual(response.status_code, 200, response.text)
+            if remember:
+                prefix.extend((user, {"role": "assistant", "content": reply}))
+            return int(response.headers["x-memory-turn-id"])
+
+        send("留下的第一轮", "留下的第一轮回复")
+        middle = send("删除的中间轮", "删除的中间回复")
+        send("留下的第三轮", "留下的第三轮回复")
+        headers = self.login()
+        endpoint = "/api/spaces/one/conversations/delete"
+        response = self.http.post(endpoint, headers=headers, json={"position_ids": [middle]})
+        self.assertEqual(response.json(), {"deleted": 1})
+        tail = send("删除的最后轮", "删除的最后回复")
+        sent = self.fake.requests[-1]["body"]["messages"]
+        self.assertIn("留下的第一轮", str(sent))
+        self.assertIn("留下的第三轮", str(sent))
+        self.assertNotIn("删除的中间", str(sent))
+        response = self.http.post(endpoint, headers=headers, json={"position_ids": [tail]})
+        self.assertEqual(response.json(), {"deleted": 1})
+
+        # Regenerating a removed prompt itself cannot send or archive it.
+        before = len(self.fake.requests)
+        retry = self.chat(messages=prefix[:-1])
+        self.assertEqual(retry.status_code, 400, retry.text)
+        self.assertIn("这轮聊天已删除", retry.text)
+        self.assertEqual(len(self.fake.requests), before)
+        resumed = send("继续的聊天", "第一次继续的回复", remember=False)
+        regenerated = send("继续的聊天", "重新生成的回答", remember=False)
+        self.assertNotEqual(resumed, regenerated)
+        for request in self.fake.requests[-2:]:
+            self.assertNotIn("删除的最后", str(request["body"]))
+            self.assertNotIn("删除的中间", str(request["body"]))
+            self.assertIn("留下的第三轮", str(request["body"]))
+        listing = self.http.get("/api/spaces/one/conversations").json()["items"]
+        self.assertEqual(listing[-1]["id"], regenerated)
+        self.assertEqual(listing[-1]["position_id"], resumed)
+        self.assertEqual(len(listing), 3)
+        with connect(self.app) as c:
+            messages = c.execute("SELECT content_parts FROM memory_core.conversation_messages").fetchall()
+        self.assertNotIn("删除的最后", str(messages))
+        self.assertNotIn("删除的中间", str(messages))
+
+    def test_delete_requires_session_csrf_and_all_positions_in_this_space(self):
+        other = ConversationStore(self.app, "two")
+        body = {"model": "synthetic", "messages": [{"role": "user", "content": "另一空间"}]}
+        foreign = other.begin(body, {})
+        other.finish(foreign, content="别的空间", finish_reason="stop")
+        local = int(self.chat("当前空间").headers["x-memory-turn-id"])
+        endpoint = "/api/spaces/one/conversations/delete"
+        payload = {"position_ids": [local]}
+        self.assertEqual(self.http.post(endpoint, headers={"Origin": ORIGIN, **self.auth}, json=payload).status_code, 401)
+        headers = self.login()
+        self.assertEqual(self.http.post(endpoint, headers={"Origin": ORIGIN}, json=payload).status_code, 403)
+        mixed = {"position_ids": [local, foreign["turn_id"]]}
+        self.assertEqual(self.http.post(endpoint, headers=headers, json=mixed).status_code, 404)
+        self.assertEqual(self.http.get("/api/spaces/one/conversations").json()["items"][0]["id"], local)
+        self.assertEqual(self.http.get("/api/spaces/two/conversations").json()["items"][0]["id"], foreign["turn_id"])
+
+    def test_delete_refuses_history_frozen_in_a_tool_turn(self):
+        local = int(self.chat("正在使用的原话").headers["x-memory-turn-id"])
+        self.assertEqual(self.chat("请调用工具", model="synthetic-round").status_code, 200)
+        headers = self.login()
+        response = self.http.post("/api/spaces/one/conversations/delete",
+                                  headers=headers, json={"position_ids": [local]})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("当前回复正在使用所选聊天", response.text)
+        listing = self.http.get("/api/spaces/one/conversations").json()["items"]
+        self.assertEqual(listing[0]["id"], local)
+        self.assertEqual(listing[-1]["generation_state"], "waiting_tools")
+
     def test_history_failure_blocks_upstream_but_recall_failure_does_not(self):
         with patch.object(
             ConversationStore,
@@ -526,8 +603,14 @@ class HostedProxyTests(DatabaseTestCase):
                 0,
             )
 
-    def test_kelivo_and_operit_title_requests_pass_through_without_storing(self):
+    def test_kelivo_and_operit_background_requests_pass_through_without_storing(self):
         for messages in (
+            [{"role": "system", "content": "\n你要从对话中构建长期记忆图谱。\n只输出 JSON。"},
+             {"role": "user", "content": "问题：\n合成问题\n\n解决方案：\n合成回答"}],
+            [{"role": "system", "content": "You are an AI assistant responsible for generating a conversation summary. Keep it short."},
+             {"role": "user", "content": "合成对话"}],
+            [{"role": "system", "content": '你是\\"角色卡生成助手\\"。请严格按照以下流程进行角色卡生成：'},
+             {"role": "user", "content": "合成角色"}],
             [{"role": "user", "content": "I will give you some dialogue content in the <dialogue> block. 合成对话"}],
             [{"role": "system", "content": "你负责生成简短的对话标题。\n根据用户第一条消息总结。"},
              {"role": "user", "content": "用户第一条消息：\n合成对话"}],

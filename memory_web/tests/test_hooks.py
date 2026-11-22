@@ -7,6 +7,7 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from memory_core.conversations.chat_text import RECALL_END, RECEIPT_RULE
 from memory_core.conversations.conversations import ConversationStore
 from memory_core.conversations.hook_turns import HookTurns, PENDING_LIFETIME
 from memory_core.daily.receipt_judge import ReceiptJudgeStore
@@ -190,6 +191,7 @@ class HookTests(DatabaseTestCase):
             source_date="2026-06-01", item_kind="atomic", experience_mode=None,
         )])
         self.assertEqual(self.claude("user-prompt-submit", prompt_id="cc-prompt", prompt="合成对话：约好一起读书"), value["context"])
+        self.assertNotIn("<used>", value["context"])
         # Same approved card and history inputs on the same space.
         with connect(self.app) as c:
             self.assertEqual(c.execute(
@@ -201,7 +203,12 @@ class HookTests(DatabaseTestCase):
             "memory": {"operation": "new"},
         }, headers=self.auth)
         self.assertEqual(output.status_code, 200, output.text)
-        self.assertIn(value["context"], self.fake.requests[-1]["body"]["messages"][-3]["content"])
+        supplement = self.fake.requests[-1]["body"]["messages"][-3]["content"]
+        start = supplement.index("<retrieved_memories>")
+        end = supplement.index(RECALL_END, start) + len(RECALL_END)
+        proxy_recall = supplement[start:end]
+        self.assertIn("<used>", proxy_recall)
+        self.assertEqual(proxy_recall.replace("\n" + RECEIPT_RULE, "", 1), value["context"])
 
         first = self.stop(1, "旧版回复。")
         newest = self.stop(1, "合成最新回复。\n<used>1</used>")

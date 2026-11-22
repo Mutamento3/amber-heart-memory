@@ -15,10 +15,11 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 import psycopg
+from psycopg.types.json import Jsonb
 
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
-from memory_core.cards.drafts import DraftStore
+from memory_core.cards.drafts import DraftStore, capture_policy
 from memory_core.storage.install import install, InstallationMismatch
 from memory_core.cards.keyword_index import build_rows
 from memory_core.storage.postgres import PostgresStore
@@ -424,13 +425,21 @@ class AdminTests(DatabaseTestCase):
         self.assertEqual(self.write(path, body).status_code, 409)
         actual = response.json()
         body["expected_version"] = actual["version"]
-        body["payload"]["evidence"][0]["quote"] = "原文不存在的证据"
-        self.assertEqual(self.write(path, body).status_code, 400)
+        excerpt = dict(segment_id=actual["payload"]["evidence"][0]["segment_id"], quote="周末一起学植物")
+        body["payload"]["evidence"] = [
+            excerpt,
+            dict(segment_id="missing-segment", quote="无对应段落的摘录"),
+        ]
+        response = self.write(path, body)
+        self.assertEqual(response.status_code, 200, response.text)
+        actual = response.json()
+        self.assertEqual(actual["payload"]["evidence"], [excerpt])
         response = self.approve(actual)
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("嵌入", response.text)
         self.assertEqual(self.http.get(path).json()["draft"]["status"], "pending")
-        body["payload"] = actual["payload"]
+        body["expected_version"] = actual["version"]
+        body["payload"] = deepcopy(actual["payload"])
         body["payload"]["summary"] = "失败后继续修改"
         self.assertEqual(self.write(path, body).status_code, 200)
 
@@ -1000,11 +1009,40 @@ class AdminTests(DatabaseTestCase):
 
 
 class UpgradeTests(DatabaseTestCase):
+    def legacy_draft(self, key):
+        # Seed the rows a v6/v7 extractor left behind. Today's structurer requires v26.
+        space = "sample"
+        store = DraftStore(self.app, space)
+        topic = next(topic for topic in store.topics() if topic["name"] == "工作与学习")
+        day = "2026-10-29"
+        content = "小禾与林舟计划一起学习植物。"
+        segment = dict(segment_id="s1", speaker="user", text=content, timestamp=day + "T14:00:00+08:00")
+        first = dict(title="植物学习计划", content=content, summary=content, importance=8,
+                     evidence=[dict(segment_id=segment["segment_id"], quote=content)])
+        payload = dict(first, experience_mode="shared", cognitive_status="stable",
+                       decay_layer="tier_4_episode", source_date=day, is_milestone=False,
+                       valence=0.5, arousal=0.3, topic_ids=[topic["id"]], entities=[], relations=[])
+        with connect(self.app) as connection:
+            extraction = store.submit("synthetic:" + key, "synthetic-request:" + key, [segment], connection=connection)
+            revision = connection.execute(
+                """UPDATE memory_core.material_extractions SET status='complete',version=3
+                WHERE id=%s RETURNING policy_revision""",
+                (extraction,),
+            ).fetchone()["policy_revision"]
+            draft_id = connection.execute(
+                """INSERT INTO memory_core.pending_memories
+                    (bot_id,extraction_id,ordinal,business_date,policy_revision,version,narrative,payload,status)
+                VALUES (%s,%s,0,%s,%s,2,%s,%s,'pending') RETURNING id""",
+                (space, extraction, day, revision, Jsonb(first), Jsonb(payload)),
+            ).fetchone()["id"]
+            capture_policy(connection, space, draft_id=draft_id)
+        return store.get(draft_id)
+
     def test_v7_to_v8_preserves_configuration_cards_drafts_snapshots_and_sessions(self):
         install(self.owner, Settings(3), target_version=7)
         config = SpaceConfiguration(self.owner)
         config.configure("sample", Participant("小禾"), Participant("林舟"))
-        item, _ = draft(self.app, "sample", "before-date")
+        item = self.legacy_draft("before-date")
         mid = PostgresStore(self.app, "sample").write_card("Synthetic existing card", [1, 0, 0])
         install_web(self.owner)
         with tempfile.TemporaryDirectory() as directory:
@@ -1014,6 +1052,11 @@ class UpgradeTests(DatabaseTestCase):
             with connect(self.app) as connection:
                 before_policy = connection.execute("SELECT * FROM memory_core.space_policies WHERE bot_id='sample'").fetchone()
                 before_card = connection.execute("SELECT * FROM memory_core.memory_items WHERE id=%s", (mid,)).fetchone()
+            self.assertTrue(install(self.owner, Settings(3), target_version=8))
+            with connect(self.app) as connection:
+                v8_policy = connection.execute("SELECT * FROM memory_core.space_policies WHERE bot_id='sample'").fetchone()
+            self.assertEqual(v8_policy, dict(before_policy, acquaintance_date=None))
+            self.assertEqual(DraftStore(self.app, "sample").get(item["id"]), item)
             self.assertTrue(install(self.owner, Settings(3)))
             self.assertFalse(install(self.owner, Settings(3)))
             self.assertFalse(install_web(self.owner))
@@ -1024,6 +1067,7 @@ class UpgradeTests(DatabaseTestCase):
                 self.assertEqual(after_policy.pop("conversation_retention_days"), 30)
                 self.assertEqual(after_policy.pop("persona"), "")
                 self.assertTrue(after_policy.pop("auto_approve_enabled"))
+                self.assertTrue(after_policy.pop("period_notes_enabled"))
                 removed_columns = set(before_policy) - set(after_policy)
                 self.assertEqual(len(removed_columns), 1)
                 self.assertEqual(after_policy.pop("core_memory"), "\n".join(before_policy.pop(removed_columns.pop())))
@@ -1036,6 +1080,8 @@ class UpgradeTests(DatabaseTestCase):
                 self.assertEqual(after_card, before_card)
             after_draft = DraftStore(self.app, "sample").get(item["id"])
             self.assertIsNotNone(after_draft.pop("review_ready_at"))
+            for field in ("structure_claim_token", "structure_claimed_at", "structure_claim_until"):
+                self.assertIsNone(after_draft.pop(field))
             self.assertEqual(after_draft, item)
             self.assertNotIn("acquaintance_date", item["policy_snapshot"])
             settings = WebSettings(self.app, self.owner, ORIGIN, password)
@@ -1053,7 +1099,7 @@ class UpgradeTests(DatabaseTestCase):
         install(self.owner, Settings(3), target_version=6)
         config = SpaceConfiguration(self.owner)
         config.configure("sample", Participant("小禾"), Participant("林舟"))
-        old, _ = draft(self.app, "sample", "old")
+        old = self.legacy_draft("old")
         topic = old["payload"]["topic_ids"][0]
         config.edit_topic("sample", topic, expected_revision=1, name="学习计划")
         with connect(self.owner) as connection:
@@ -1061,9 +1107,9 @@ class UpgradeTests(DatabaseTestCase):
                 "UPDATE memory_core.topics SET description=%s WHERE id=%s",
                 ("升级前已有的主题说明", topic),
             )
-        # The helper needs the original approved topic name to construct its fixed response.
+        # Restore the template name required by migration 009, with a newer policy revision.
         config.edit_topic("sample", topic, expected_revision=2, name="工作与学习")
-        current, _ = draft(self.app, "sample", "current")
+        current = self.legacy_draft("current")
         install(self.owner, Settings(3))
         store = DraftStore(self.app, "sample")
         self.assertIsNone(store.get(old["id"])["policy_snapshot"])

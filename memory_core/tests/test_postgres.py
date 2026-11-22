@@ -294,10 +294,24 @@ class StorageTests(unittest.TestCase):
             self.assertIn("FOREIGN KEY (memory_id, bot_id)", foreign_key)
             self.assertIn("ON DELETE CASCADE", foreign_key)
             self.assertIsNotNone(connection.execute("SELECT pg_get_serial_sequence('memory_core.memory_items','id') AS value").fetchone()["value"])
-            public_functions = connection.execute("""SELECT p.proname FROM pg_proc p
+            outsider_executable = connection.execute("""SELECT p.proname FROM pg_proc p
                 JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='memory_core'
-                AND (p.prosecdef OR has_function_privilege('memory_outsider',p.oid,'EXECUTE'))""").fetchall()
-            self.assertEqual(public_functions, [])
+                AND has_function_privilege('memory_outsider',p.oid,'EXECUTE')""").fetchall()
+            self.assertEqual(outsider_executable, [])
+            definer_functions = connection.execute("""SELECT p.oid::regprocedure::text AS signature,
+                pg_get_userbyid(p.proowner) AS owner,p.proconfig AS settings,
+                has_function_privilege('memory_app',p.oid,'EXECUTE') AS app_can_execute
+                FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='memory_core' AND p.prosecdef""").fetchall()
+            self.assertCountEqual([row["signature"] for row in definer_functions], [
+                "discard_import_preview(text,uuid)",
+                "release_unfinished_import_materials(text,uuid)",
+            ])
+            for row in definer_functions:
+                with self.subTest(function=row["signature"]):
+                    self.assertEqual(row["owner"], "memory_owner")
+                    self.assertEqual(row["settings"], ["search_path=pg_catalog, memory_core"])
+                    self.assertTrue(row["app_can_execute"])
             self.assertFalse(connection.execute("SELECT relrowsecurity AS value FROM pg_class WHERE oid='memory_core.memory_items'::regclass").fetchone()["value"])
         for statement in (
             "CREATE TABLE memory_core.forbidden(id integer)",

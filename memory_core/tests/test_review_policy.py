@@ -65,12 +65,12 @@ class ReviewClockTests(DatabaseTestCase):
         draft=self.store.get(draft['id'])
         model=FixedModels({'extract':{self.store.structure_prompt(draft['id']):json.dumps(graph)}})
         first=datetime.fromisoformat('2026-11-04T12:00:00+08:00')
-        self.store._structure(draft,model,clock=lambda:first)
-        current=self.store.get(draft['id'])
-        self.assertEqual(datetime.fromisoformat(current['review_ready_at']),first)
-        self.store._structure(current,model,clock=lambda:first+timedelta(hours=4))
-        current=self.store.get(draft['id'])
-        self.assertEqual(datetime.fromisoformat(current['review_ready_at']),first)
+        current = self.store.restructure(draft, structurer=model, clock=lambda: first)
+        self.assertEqual(current['status'], 'pending')
+        self.assertEqual(datetime.fromisoformat(current['review_ready_at']), first)
+        with self.assertRaises(RevisionConflict):
+            self.store.restructure(current, structurer=model, clock=lambda: first + timedelta(hours=4))
+        self.assertEqual(self.store.get(current['id']), current)
         saved=self.store.edit(current['id'],current['payload'],expected_version=current['version'],expected_policy_revision=current['policy_revision'],clock=lambda:first+timedelta(hours=8))
         self.assertEqual(datetime.fromisoformat(saved['review_ready_at']),first+timedelta(hours=8))
         with self.assertRaises(RevisionConflict):

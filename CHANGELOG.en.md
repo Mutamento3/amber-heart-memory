@@ -4,6 +4,17 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.5.0 · 2026-11-22
+
+- New-version notice: when a feature release comes out, opening the admin overview pops up its release notes once, and a "New version" button stays in the top-right corner until you upgrade. Small fixes aren't announced. If the server can't reach GitHub nothing is shown; set `MEMORY_UPDATE_CHECK=false` in `.env` to turn the check off. The bottom of the Settings page shows the current version.
+- New connection guides for Kelivo and Operit under "Settings → Access keys", written step by step against the real app screens, with your address and key already filled in for copying; also available [as documents](docs/connect/kelivo.en.md).
+- New memory explanation: paged cards explaining what core memory, memory bookmarks, diaries, instant summaries and memory cards are, where each comes from and when the companion sees it. It pops up once the first time you open the admin web app and can be reopened from the bottom of the Settings page.
+- The persona box now says that anything entered there replaces the chat app's system prompt (including character cards and lorebooks), and this one wins if both are filled.
+- Fix: with Operit's "OpenAI Generic" provider and a DeepSeek chat model in thinking mode, any memory tool call failed with 400. Amber Heart now restores the thinking content Operit doesn't send back (kept briefly in memory only, never stored in the database).
+- Operit's automatic title requests are no longer recorded as chat, same as Kelivo's.
+- The background-jobs status on the overview now shows the daily time when the previous day's chats are processed.
+- Daily extraction now gives the persona to the model as background, to help it understand the people and relationships in the chat; things already mentioned in the persona or core memory are still extracted as cards when the chat brings something new worth keeping.
+
 ## v0.4.1 · 2026-11-20
 
 - Chat apps resend the whole conversation each time. Amber Heart never used those older messages, and now no longer checks their content types either, so a video or file in an old message no longer makes the whole request fail. If the current turn contains an unsupported content type, the error names that type.

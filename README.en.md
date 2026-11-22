@@ -332,6 +332,9 @@ If you are an AI assistant installing this on a user's behalf:
   Addresses and model names that aren't provided use the recommended values; if no rerank variables are provided, first-stage reranking is skipped.
 - Every step has a "to confirm" check. When something fails, look at `docker compose logs app` first; the most common causes are a wrong key, a wrong model name, or the domain not resolving to this machine.
 - The script can be run repeatedly: when a `.env` already exists, it doesn't overwrite the configuration; it only rebuilds and upgrades.
+- **Do not fill in the persona for the user.** Once the persona has content, it replaces the system prompt, character cards and lorebooks in the user's chat app; left empty, the app's own are used. Let the user decide whether to fill it in.
+- After installing, pass on to the user the notes under "Settings → Access key → In your chat app, also set" (设置 → 访问钥匙 → 在聊天应用里还要设置) in the admin web app: turn off the app's auto summary, set the context message count to about 4, and don't choose this service for small features such as titles and translation; also remind the user that a persona replaces the app's character cards and lorebooks.
+- The admin web app's endpoints (such as `/api/spaces/{space}/access-key`) can only be called after the user logs in to the web app, not with the access key; have the user generate and copy the key on the web page.
 
 ### Already running nginx or another reverse proxy
 
@@ -413,8 +416,9 @@ Different apps name their menus differently, but the steps are the same. Below a
    - **API Key**: the key generated under "Settings → Access keys" (设置 → 访问钥匙) in the admin web app.
 4. **Fetch models**: click "Fetch models" (fetch model list, refresh). The list shows the models on your model provider; choose one as the main chat model.
 5. **Conversation settings**:
-   - **System prompt**: if a persona is set in the memory server, it replaces this; you can leave it empty in the app.
+   - **System prompt**: if a persona is set in the memory server, it replaces this, and the app's character cards and lorebooks stop taking effect too. To use the app's own, leave the memory server's persona empty.
    - **Context message count** (number of context messages, history messages): keeping about the last 4 is enough. The memory server assembles the context itself each turn; however long the history shown in the app gets, it's only display, and a smaller count also saves data.
+   - **Auto summary** (context compression, auto summarization): turn it off. The memory server makes its own summaries; if it's on, the app may trigger it often based on token usage and compress the conversation into a third-person outline of "user" and "AI assistant", which looks as if the character is gone.
 6. **Move helper features elsewhere**: for helper features such as generating titles, translation and generating search queries, if the app lets you choose a separate model for them, don't choose the memory server service; turn them off or connect them directly to the model provider instead, otherwise they will also be recorded in the conversation as chat.
 
 ### Can't connect?
@@ -440,6 +444,8 @@ git pull
 ```
 
 When `install.sh` finds an existing configuration, it only upgrades: it rebuilds, upgrades the database schema automatically and restarts the services, keeping the configuration and data unchanged.
+
+When a feature release comes out, opening the admin overview pops up its release notes once, and a "New version" button stays in the top-right corner until you upgrade. Small fixes aren't announced. To stop the server from checking GitHub for versions, set `MEMORY_UPDATE_CHECK=false` in `.env`. The bottom of the Settings page shows the current version.
 
 See the [changelog](CHANGELOG.en.md) for what changed in each version.
 

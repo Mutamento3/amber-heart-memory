@@ -437,3 +437,9 @@ Operit：MCP 配置页 →“导入”→“远程”，“主机地址”填完
 待审草稿按竖向列表展开，编辑、拒绝和收录针对单卡。整理失败会显示原因，也可只重跑该卡的结构整理。记忆文件的正文按共享成文规则决定是否改写，留存的原文可以在卡片详情展开。导入不会补写日记，也不提供整批撤回。已结束的月份按内容日期进入现有园丁窗口。导入原文不会进入聊天历史、摘要或日记，已审核卡片仍正常参与记忆召回。防重和原材料保留规则见[核心导入](../memory_core/README.md#导入版本-22)。
 
 管理员接口：`GET /api/spaces/{space}/imports` 查看配置与进度，`POST .../imports/upload?source=chatgpt|claude|gemini|deepseek|kelivo|memory&filename=...` 以 `application/octet-stream` 上传一个原文件，`GET .../imports/{id}` 查看任务，`POST .../{id}/preview` / `confirm` 接收 `selected_conversations` 或 `date_start/date_end`，Kelivo 可同时传聊天对话、聊天日期及 `selected_memories`，预览返回 `assistant_groups` 和 `memory_groups`，`confirm` 可另传布尔值 `auto_approve`，`POST .../{id}/retry` 以及 `POST .../{id}/stop`、`/discard`、`/end` 接收空对象。其余操作保持 JSON；全部使用管理员 Cookie、Origin 和 CSRF，不接受空间访问钥匙。实际请求体上限为 90 MiB，nginx 样例同步限制为 90m。ZIP 内相关 JSON 解压后累计上限为 1 GiB，Kelivo 聊天数据库解压后上限同为 1 GiB。JSON 使用流式解析并分批入队，Kelivo 把备份数据库流式解压到磁盘后只读打开，缺少记忆表时从 `settings.json` 读取对应的记忆列表。确认只读元数据，首次打开 Kelivo 预览也会读取记忆条目正文供用户选择。上传、Gemini 按日排序和 Kelivo 数据库的临时文件放在密码文件所在的私有状态目录（默认是磁盘 app_state 卷），该目录须可写，完成或出错后清除临时文件。不要把此目录改为 tmpfs，否则磁盘暂存仍会占用容器内存。
+
+## 新版本提醒与记忆说明
+
+`memory_web/version.py` 记当前版本，发版时随更新日志一起改。概览接口额外返回 `version` 和 `update`：服务启动时和之后每天向 GitHub 查一次公开仓库的版本标签（失败一小时后重试，查不到不报错），只有最新标签的前两位版本号大于当前时 `update` 才非空，含 `current`、`latest`、`notes`（该版本 GitHub Release 正文 `---` 之上的中文部分，没写 Release 时为空）和更新日志链接。概览右上角据此显示“有新版本”按钮，并在打开概览时自动弹出一次更新卡片，“我知道了”按版本记在浏览器里，按钮留到升级为止。`MEMORY_UPDATE_CHECK=false` 关闭检查。配置接口返回 `version`，设置页底部显示当前版本。
+
+概览“后台整理状态”的每日抽卡一行附带每天的整理时间（`daily_extraction.run_time`，按安装时区，默认业务日分界后 15 分钟）。记忆说明是固定的翻页卡片，不读取数据：每个浏览器第一次打开概览时自动弹出一次（和更新卡片不同时弹），之后从设置页最上面或“开始使用”卡片打开。

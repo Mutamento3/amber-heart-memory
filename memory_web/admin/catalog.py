@@ -24,6 +24,7 @@ from memory_core.recall.search_store import SearchStore
 from memory_core.storage.space import read_policy, read_topics
 from memory_core.recall.tool_history import ERROR, memory_items, object_value, one_line, result_text, tool_identity
 from .configuration_changes import changes
+from ..version import VERSION
 
 
 def conversation_tool_line(call):
@@ -109,6 +110,7 @@ class Catalog:
                 "auto_approve_enabled": policy.get("auto_approve_enabled",policy.get("review_mode","auto")=="auto"),
                 "auto_approve_delay_hours": self.approval_policy.delay_hours,
                 "period_notes_enabled": policy.get("period_notes_enabled", True),
+                "version": VERSION,
                 "topics": topics,
                 "known_entities": context["known_entities"],
                 "review_snapshot": connection.execute(
@@ -169,6 +171,8 @@ class Catalog:
                 added_count=0,
                 pending_count=0,
                 calls=0,
+                # Local clock time of the nightly batch, so the page can say when cards appear.
+                run_time=self.daily_policy.run_time or f"{core.day_start_hour:02d}:15",
             )
             if latest:
                 identifiers = (latest["result"] or {}).get("extraction_ids", [])

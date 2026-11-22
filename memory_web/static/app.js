@@ -87,6 +87,8 @@ const url = (suffix) => `/api/spaces/${encodedSpace()}${suffix}`;
 const NAV_PAGES = ["overview", "review", "memories", "conversations", "settings"];
 const OVERVIEW_PAGES = ["diaries", "summaries", "core-memory", "bookmarks"];
 const PAGES = [...NAV_PAGES, ...OVERVIEW_PAGES, "imports"];
+// Pages reached from the overview get a back arrow and keep the overview tab lit.
+const FROM_OVERVIEW = OVERVIEW_PAGES;
 const pageCache = new Map();
 let pageDataRevision = 0;
 const configurationPages = ["settings", "core-memory", "overview", "memories", "review", "imports"];
@@ -477,7 +479,7 @@ function renderNavigation() {
   const nav = $(".topbar nav");
   if (!nav) return;
   const page = !state.space || state.page === "imports" ? "settings"
-    : OVERVIEW_PAGES.includes(state.page) ? "overview" : state.page;
+    : FROM_OVERVIEW.includes(state.page) ? "overview" : state.page;
   nav.innerHTML = NAV_PAGES.map(item => `<a href="${appPath("/" + item)}" data-page="${item}" class="${page === item ? "active" : ""}"${page === item ? ' aria-current="page"' : ""}>${navLabel(item)}</a>`).join("");
   $$("[data-page]", nav).forEach(a => a.onclick = async event => {
     event.preventDefault();
@@ -526,7 +528,7 @@ function shell() {
   const page = state.space ? state.page : "settings";
   const [heading, eyebrow] = PAGE_INFO[page];
   document.title = `${heading} · Amber Heart`;
-  const back = OVERVIEW_PAGES.includes(page)
+  const back = FROM_OVERVIEW.includes(page)
     ? `<a class="back-arrow" href="${pageURL("overview")}" data-go="overview" aria-label="返回概览">‹</a>`
     : "";
   root.innerHTML = `<div class="shell" data-current-page="${page}"><header class="topbar"><a class="brand" href="${appPath("/overview")}">${brandHTML()}</a><nav aria-label="功能页"></nav></header><header class="pagehead"><p class="eyebrow">${esc(eyebrow)}</p><div class="heading-row">${back}<h1 id="page-title">${esc(heading)}</h1></div></header><main id="main" aria-labelledby="page-title"></main><footer>Amber Heart · 琥珀之心${state.fixed ? " · 当前使用固定假响应，仅供合成材料验收" : ""}</footer></div>`;
@@ -732,6 +734,13 @@ async function overviewPage(main, epoch, read, fresh) {
       ? `<ul class="bars">${used.map((topic) => `<li><button type="button" class="barrow" data-topic="${topic.id}" data-ratio="${topic.cards / largest}"><span class="barname">${esc(topic.name)}</span><span class="bartrack" aria-hidden="true"><span class="barfill"></span></span><span class="barcount">${topic.cards}</span></button></li>`).join("")}</ul>`
       : '<p class="empty">还没有收录的记忆。审核通过的草稿会出现在这里。</p>'
   }${idle && used.length ? `<p class="meta idle">另有 ${idle} 个主题暂时没有记忆</p>` : ""}</div></section>`;
+  const update = data.update;
+  const topbar = $(".topbar");
+  if (update && topbar && !$(".update-chip", topbar)) {
+    topbar.insertAdjacentHTML("beforeend", '<button type="button" class="update-chip"><span class="update-dot" aria-hidden="true"></span>有新版本</button>');
+    $(".update-chip", topbar).onclick = () => openUpdate(update);
+  }
+  autoPopup(update);
   const approval = data.auto_approval;
   if (data.pending && approval) {
     let schedule = "";
@@ -755,7 +764,8 @@ async function overviewPage(main, epoch, read, fresh) {
     const status = {unconfigured: "未配置", waiting: "等待每日整理", running: "正在整理", failed: "整理暂未完成，会自动重试", skipped: "当天没有可整理的对话", done: "已整理"}[extraction.status] || "等待每日整理";
     const added = extraction.added_count ? `，最近一次新增 <strong>${extraction.added_count}</strong> 张卡片` : "";
     const pending = extraction.pending_count ? `，${extraction.pending_count} 张待审核` : "";
-    const line = `<p class="daily-extraction muted" data-status="${esc(extraction.status)}">每日抽卡：${esc(status)}${added}${pending}。${extraction.added_count ? `<a href="${appPath("/memories")}" data-go="memories">查看记忆</a>` : ""}</p>`;
+    const schedule = extraction.run_time ? `每天 ${esc(extraction.run_time)} 整理前一天的聊天。` : "";
+    const line = `<p class="daily-extraction muted" data-status="${esc(extraction.status)}">每日抽卡：${esc(status)}${added}${pending}。${schedule}${extraction.added_count ? `<a href="${appPath("/memories")}" data-go="memories">查看记忆</a>` : ""}</p>`;
     // A failure is something to know today; normal states stay in the folded status.
     if (extraction.status === "failed") $(".today-status", main).insertAdjacentHTML("beforebegin", line.replace('class="daily-extraction muted"', 'class="daily-extraction today-alert"'));
     else $(".today-status", main).insertAdjacentHTML("beforeend", line);
@@ -812,13 +822,107 @@ async function onboardingCard(main, epoch) {
     return;
   }
   const go = (section, text) => `<a href="#" data-go="settings" data-section="${section}">${text}</a>`;
-  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">填好接口地址和钥匙后发一条消息，就算完成。</span>` + go("set-key", "查看接口地址")}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")}</p></section>`);
+  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">填好接口地址和钥匙后发一条消息，就算完成。</span>` + go("set-key", "查看接口地址")}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")} · <a href="#" class="open-guide">了解记忆怎么用</a></p></section>`);
   const card = $(".onboarding", main);
   wireGo(card);
+  $(".open-guide", card).onclick = (event) => { event.preventDefault(); openGuide(); };
   $("#dismiss-onboarding", card).onclick = () => {
     remember();
     card.remove();
   };
+}
+// Fixed explanation of the five kinds of memory, shown as a paged card; it reads nothing from the server.
+const GUIDE_ROWS = [
+  ["核心记忆", "关于你的长期事实和你们的约定。", "你自己写，改了从下一轮生效。", "每轮都带给 TA。"],
+  ["记忆书签", "最近的状况：身体、正在做的事、日常小事等。", "TA 聊天时顺手记下，每天凌晨整理进来。书签不会变成记忆卡片。", "每轮都带给 TA。"],
+  ["日记", "TA 写的每日回顾。", "每天凌晨根据前一天的聊天写一篇。", "每轮都带最近三天的日记。"],
+  ["及时摘要", "当天聊得多了，把早些时候的聊天浓缩成摘要，聊得再久前面的事也不会忘。", "系统自动写，当天聊到一定长度就写一份。", "每轮都带当天的摘要。"],
+  ["记忆卡片", "一件件具体的经历，长期保存。", "每天凌晨从前一天的聊天里抽出来，先进待审核，审过或到时间自动收录后入库。", "每轮自动召回和这轮聊天最相关的 5 张，不是全部都带。"],
+];
+const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p>';
+function stored(key) {
+  try { return localStorage.getItem(key); } catch { return "unavailable"; }
+}
+function store(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+}
+function popupDialog(id, onClose) {
+  const dialog = document.createElement("dialog");
+  dialog.id = id;
+  dialog.className = "popup";
+  // Focus the card itself, not its first button, so no focus ring shows on "跳过" when it opens.
+  dialog.autofocus = true;
+  const close = () => {
+    onClose();
+    dialog.close();
+    dialog.remove();
+  };
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
+  root.append(dialog);
+  return [dialog, close];
+}
+function openGuide() {
+  if ($("#guide-dialog")) return;
+  const pages = [GUIDE_INTRO, ...GUIDE_ROWS.map(([name, what, how, when]) => `<h2>${name}</h2><p class="guide-what">${what}</p><div class="guide-fact"><span>怎么来的</span><p>${how}</p></div><div class="guide-fact"><span>TA 什么时候看到</span><p>${when}</p></div>`)];
+  const [dialog, close] = popupDialog("guide-dialog", () => store("amber-guide-seen", "1"));
+  let index = 0;
+  const go = (step) => {
+    index = Math.min(pages.length - 1, Math.max(0, index + step));
+    render();
+  };
+  const render = () => {
+    const last = index === pages.length - 1;
+    dialog.innerHTML = `<div class="popup-top"><span class="eyebrow">记忆说明</span>${last ? "" : '<button type="button" class="quiet popup-skip">跳过</button>'}</div><div class="guide-page">${pages[index]}</div><div class="guide-nav"><button type="button" class="quiet guide-prev" aria-label="上一页"${index ? "" : " disabled"}>←</button><span class="meta">${index + 1} / ${pages.length}</span>${last ? '<button type="button" class="primary guide-done">我知道了</button>' : '<button type="button" class="quiet guide-next" aria-label="下一页">→</button>'}</div>`;
+    $(".guide-prev", dialog).onclick = () => go(-1);
+    if (last) $(".guide-done", dialog).onclick = close;
+    else {
+      $(".guide-next", dialog).onclick = () => go(1);
+      $(".popup-skip", dialog).onclick = close;
+    }
+  };
+  let startX = null;
+  dialog.addEventListener("touchstart", (event) => { startX = event.touches[0].clientX; }, { passive: true });
+  dialog.addEventListener("touchend", (event) => {
+    if (startX === null) return;
+    const moved = event.changedTouches[0].clientX - startX;
+    startX = null;
+    if (Math.abs(moved) > 50) go(moved < 0 ? 1 : -1);
+  });
+  render();
+  dialog.showModal();
+}
+// Release notes are the maintainer's own Markdown; only bullets, bold and code are rendered.
+function notesHTML(text) {
+  const inline = (value) => esc(value).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "";
+  let list = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    const item = /^[-*]\s+(.*)$/.exec(line);
+    if (item) {
+      if (!list) html += "<ul>";
+      list = true;
+      html += `<li>${inline(item[1])}</li>`;
+      continue;
+    }
+    if (list) html += "</ul>";
+    list = false;
+    if (line) html += `<p>${inline(line.replace(/^#+\s*/, ""))}</p>`;
+  }
+  return html + (list ? "</ul>" : "");
+}
+function openUpdate(update) {
+  if ($("#update-dialog")) return;
+  const [dialog, close] = popupDialog("update-dialog", () => store("amber-update-seen", update.latest));
+  dialog.innerHTML = `<div class="popup-top"><span class="eyebrow">新版本</span></div><h2>有新版本 v${esc(update.latest)}</h2>${update.notes ? `<div class="update-notes">${notesHTML(update.notes)}</div>` : ""}<div class="guide-fact"><span>怎么升级</span><p>在服务器上 Amber Heart 的目录里运行 <code>git pull</code>，再运行 <code>./install.sh</code>。配置和数据都会保留。</p></div><p class="meta">当前版本 v${esc(update.current)} · <a href="${esc(update.changelog)}" target="_blank" rel="noopener">完整更新日志</a></p><div class="dialog-actions"><button type="button" class="primary">我知道了</button></div>`;
+  $(".dialog-actions .primary", dialog).onclick = close;
+  dialog.showModal();
+}
+// Pops at most one card per overview visit: the explanation once per browser, then each new version once.
+function autoPopup(update) {
+  if ($("dialog[open]")) return;
+  if (!stored("amber-guide-seen")) openGuide();
+  else if (update && !["unavailable", update.latest].includes(stored("amber-update-seen"))) openUpdate(update);
 }
 const reviewPath = (filter) => url(`/drafts?status=${filter}&all_items=true`);
 const reviewDetailPath = (item) => url(item.item_kind === "topic_summary" ? `/topic-summaries/${item.id}` : `/drafts/${item.id}`);
@@ -1497,7 +1601,7 @@ async function settingsPage(main, initialize, epoch, section, read) {
   const spaceSection = state.spaces.length > 1
     ? `<section class="settings-section space-settings"><h2>记忆空间</h2><p class="muted">每个空间有各自的参与者、主题和记忆。</p><label>当前空间<select id="space" aria-label="记忆空间">${state.spaces.map((space) => `<option value="${esc(space.id)}" ${space.id === state.space ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label></section>`
     : "";
-  main.innerHTML = `${spaceSection}<div class="settings-index" role="group" aria-label="设置分区"><button type="button" data-jump="set-together">相识日</button><button type="button" data-jump="set-people">参与者</button><button type="button" data-jump="set-key">访问钥匙</button><button type="button" data-jump="set-mcp">MCP 连接</button><button type="button" data-jump="set-persona">人设</button><button type="button" data-jump="set-import">导入</button><button type="button" data-jump="set-review">自动入库</button><button type="button" data-jump="set-bookmarks">记忆书签</button></div><section class="settings-section" id="set-together" aria-labelledby="together-title"><h2 id="together-title">相识日</h2><p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p><form id="together-form" class="together"><div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form></section><section class="settings-section" id="set-people" aria-labelledby="people-title"><h2 id="people-title">参与者</h2><p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}</section><section class="settings-section" id="set-key" aria-labelledby="key-title"><h2 id="key-title">访问钥匙</h2><p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p><div class="mcp-field"><label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label><button type="button" id="copy-proxy">复制</button></div><div id="key-content"><p class="loading">正在读取…</p></div></section><section class="settings-section" id="set-mcp" aria-labelledby="mcp-title"><h2 id="mcp-title">MCP 连接</h2><p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p><div id="mcp-content"></div></section><section class="settings-section" id="set-persona" aria-labelledby="persona-title"><h2 id="persona-title">人设（系统提示词）</h2><p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p><form id="persona-form"><div class="persona-import"><button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span><input type="file" id="persona-file" hidden></div><label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="输入人设…">${esc(config.persona || "")}</textarea></label><p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-import" aria-labelledby="import-title"><h2 id="import-title">导入</h2><p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p><button type="button" class="primary" data-go="imports">去导入</button></section><section class="settings-section" id="set-review" aria-labelledby="auto-approval-title"><h2 id="auto-approval-title">自动入库</h2><form id="auto-approval-form"><label class="check" for="auto-approval"><input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label><p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-bookmarks" aria-labelledby="bookmark-settings-title"><h2 id="bookmark-settings-title">记忆书签</h2><form id="period-notes-form"><label class="check" for="period-notes"><input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label><p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form></section>${logoutHTML()}`;
+  main.innerHTML = `${spaceSection}<div class="settings-index" role="group" aria-label="设置分区"><button type="button" data-jump="set-together">相识日</button><button type="button" data-jump="set-people">参与者</button><button type="button" data-jump="set-key">访问钥匙</button><button type="button" data-jump="set-mcp">MCP 连接</button><button type="button" data-jump="set-persona">人设</button><button type="button" data-jump="set-import">导入</button><button type="button" data-jump="set-review">自动入库</button><button type="button" data-jump="set-bookmarks">记忆书签</button></div><section class="settings-section" id="set-together" aria-labelledby="together-title"><h2 id="together-title">相识日</h2><p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p><form id="together-form" class="together"><div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form></section><section class="settings-section" id="set-people" aria-labelledby="people-title"><h2 id="people-title">参与者</h2><p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}</section><section class="settings-section" id="set-key" aria-labelledby="key-title"><h2 id="key-title">访问钥匙</h2><p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p><div class="mcp-field"><label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label><button type="button" id="copy-proxy">复制</button></div><div id="key-content"><p class="loading">正在读取…</p></div><div class="hint key-tips"><strong>在聊天应用里还要设置</strong><ul><li>关掉应用自己的自动总结、上下文压缩。记忆库会自己做摘要；开着的话，应用可能把对话压成“用户、AI 助手”的提纲，看起来像角色没了。</li><li>上下文条数保留 4 条左右就够了。</li><li>应用里自动起标题、翻译这类小功能，如果能单独选模型，不要选记忆库这个服务，改选模型平台的或者关掉，不然它们也会被当成聊天记进记忆。</li></ul></div></section><section class="settings-section" id="set-mcp" aria-labelledby="mcp-title"><h2 id="mcp-title">MCP 连接</h2><p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p><div id="mcp-content"></div></section><section class="settings-section" id="set-persona" aria-labelledby="persona-title"><h2 id="persona-title">人设（系统提示词）</h2><p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p><form id="persona-form"><div class="persona-import"><button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span><input type="file" id="persona-file" hidden></div><p class="hint" id="persona-active" ${(config.persona || "").trim() ? "" : "hidden"}>现在聊天应用里的系统提示词、角色卡和世界书都不会生效。想用聊天应用自己的，把这里清空就行。</p><label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="注意：这里填了就会替换聊天应用里的系统提示词（包括角色卡、世界书），两边都填的话以这里为准；不填就用聊天应用自己的。">${esc(config.persona || "")}</textarea></label><p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-import" aria-labelledby="import-title"><h2 id="import-title">导入</h2><p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p><button type="button" class="primary" data-go="imports">去导入</button></section><section class="settings-section" id="set-review" aria-labelledby="auto-approval-title"><h2 id="auto-approval-title">自动入库</h2><form id="auto-approval-form"><label class="check" for="auto-approval"><input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label><p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-bookmarks" aria-labelledby="bookmark-settings-title"><h2 id="bookmark-settings-title">记忆书签</h2><form id="period-notes-form"><label class="check" for="period-notes"><input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label><p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form></section><button type="button" class="guide-entry"><span><strong>记忆说明</strong><span class="meta">核心记忆、书签、日记、摘要和卡片有什么区别</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button>${config.version ? `<p class="meta app-version">当前版本 v${esc(config.version)}</p>` : ""}${logoutHTML()}`;
   wireSpaceSelector();
   wireLogout();
   // The four writes use the same space revision, even across different forms.
@@ -1547,6 +1651,7 @@ async function settingsPage(main, initialize, epoch, section, read) {
   window.addEventListener("scroll", onSettingsScroll, { passive: true });
   markCurrentSection();
   wireGo($("#set-import", main));
+  $(".guide-entry", main).onclick = openGuide;
   // The chat proxy lives next to /mcp on the same origin.
   const proxyAddress = $("#proxy-address", main);
   proxyAddress.value = (state.mcpUrl || "").replace(/\/mcp\/?$/, "/v1");
@@ -1586,6 +1691,9 @@ async function settingsPage(main, initialize, epoch, section, read) {
   };
   const persona = $("#persona-form");
   autosaveSetting(persona, "/persona", "persona", () => persona.elements.persona.value);
+  persona.elements.persona.addEventListener("input", () => {
+    $("#persona-active", main).hidden = !persona.elements.persona.value.trim();
+  });
   wirePersonaImport(persona);
   const autoApproval = $("#auto-approval-form");
   autosaveSetting(autoApproval, "/auto-approval", "auto_approve_enabled", () => autoApproval.elements.auto_approve_enabled.checked);

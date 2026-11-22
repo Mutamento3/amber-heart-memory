@@ -1111,6 +1111,8 @@ def main():
             has_touch=True,
             locale="zh-CN",
         )
+        # The memory explanation pops once per browser; these flows test other pages.
+        context.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         context.add_init_script(
             """document.addEventListener('DOMContentLoaded',()=>{
             document.documentElement.style.setProperty('--safe-top','59px');
@@ -1525,6 +1527,7 @@ def main():
             headless=True, args=["--no-sandbox", "--disable-crashpad-for-testing"]
         )
         desktop = browser.new_page(viewport={"width": 1366, "height": 900})
+        desktop.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         desktop.goto(ORIGIN + "/login")
         desktop.get_by_label("管理员密码", exact=True).fill(PASSWORD)
         desktop.get_by_role("button", name="登录", exact=True).click()

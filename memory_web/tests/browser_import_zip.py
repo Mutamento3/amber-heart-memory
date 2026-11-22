@@ -56,6 +56,7 @@ class BrowserImportZipTests(unittest.TestCase):
     def setUp(self):
         self.jobs, self.uploads, self.actions = [], [], []
         self.page = self.browser.new_page(viewport={"width": 375, "height": 812})
+        self.page.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         self.addCleanup(self.page.close)
         self.page.route(ORIGIN + "/**", self.respond)
         self.page.add_init_script("""

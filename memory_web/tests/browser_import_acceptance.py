@@ -80,6 +80,7 @@ def main():
     with sync_playwright() as playwright:
         browser=playwright.webkit.launch()
         page=browser.new_page(viewport=dict(width=375,height=812),is_mobile=True,has_touch=True)
+        page.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         errors=[]
         page.on('pageerror',lambda error: errors.append(str(error)))
         page.goto(ORIGIN+'/login')
@@ -199,6 +200,7 @@ def main():
 
         browser=playwright.chromium.launch()
         desktop=browser.new_page(viewport=dict(width=1280,height=900))
+        desktop.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         desktop.goto(ORIGIN+'/login')
         desktop.get_by_label('管理员密码',exact=True).fill('synthetic acceptance password')
         desktop.get_by_role('button',name='登录',exact=True).click()

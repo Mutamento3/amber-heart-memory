@@ -54,6 +54,8 @@ from memory_core.storage.space import (
 )
 from .admin.auth import AuthenticationError, RateLimited, Sessions
 from .admin.catalog import Catalog
+from .admin.update_check import UpdateChecker
+from .version import VERSION
 from .admin.static_assets import StaticAssets
 from .config import WebSettings
 from .admin.access_keys import AccessKeys, KeyConfigurationError
@@ -162,10 +164,13 @@ def create_app(
     image_models=None,
     receipt_judge_models=None,
     recent_note_models=None,
+    update_checker=None,
 ):
     settings = settings or WebSettings.from_env()
     sessions = Sessions(settings.dsn, settings.password_file)
     catalog = Catalog(settings.dsn)
+    updates = update_checker or UpdateChecker()
+    updates.status()  # start the first check now so the first page load already knows
     config = SpaceConfiguration(settings.config_dsn)
     # Verify the ordinary application role without requiring any existing space.
     from memory_core.storage.postgres import PostgresStore
@@ -622,7 +627,7 @@ def create_app(
             topic_summary_configured=daily.topic_summary_enabled and daily.topic_summary_models.configured,
             extraction_configured=daily.extraction_enabled
             and daily.extraction_models.configured,
-        )
+        ) | {"version": VERSION, "update": updates.status()}
 
     @app.get("/api/spaces/{space}/drafts")
     def drafts(

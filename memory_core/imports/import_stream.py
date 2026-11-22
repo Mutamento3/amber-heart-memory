@@ -20,6 +20,7 @@ from .import_formats import (ImportDay, ImportFormatError, MAX_UPLOAD_BYTES,
     MAX_JSON_BYTES, SOURCES, _object, _identifier, _hash, _chatgpt, _claude,
     _split, _memory, _gemini)
 from .kelivo import kelivo_days
+from .operit import operit_days
 from .deepseek import FORMAT_ERROR as DEEPSEEK_FORMAT_ERROR, indexed_session_id, session_days
 
 
@@ -100,12 +101,14 @@ def documents(source, uploads, max_json_bytes):
                             # Takeout localizes the directories. _gemini
                             # retains only the Gemini records by their header.
                             selected = path.name.lower() == 'myactivity.json'
+                        elif source == 'operit':
+                            selected = path.suffix.lower() == '.json' and not path.name.startswith('._') and '__MACOSX' not in path.parts
                         else:
                             pattern = r'conversations(?:-\d+)?\.json' if source=='chatgpt' else r'conversations\.json'
                             selected = re.fullmatch(pattern,path.name) is not None
                         if not selected or member.is_dir():
                             continue
-                        if path.is_absolute() or '..' in path.parts or member.flag_bits & 1:
+                        if path.is_absolute() or '..' in path.parts or '\\' in member.filename or member.flag_bits & 1:
                             raise ImportFormatError('导出压缩包包含不支持的路径或加密文件')
                         declared += member.file_size
                         if declared > max_json_bytes:
@@ -115,11 +118,11 @@ def documents(source, uploads, max_json_bytes):
                             with BufferedReader(JsonReader(member_stream,budget)) as document:
                                 yield document
                     if not found:
-                        raise ImportFormatError('ZIP 内没有找到所选来源的聊天 JSON，请核对导出格式')
-            except (BadZipFile,RuntimeError,NotImplementedError):
-                raise ImportFormatError('无法读取 ZIP，请使用未加密的聊天 JSON 压缩文件') from None
+                        raise ImportFormatError('ZIP 内没有找到所选来源的导出 JSON，请核对导出格式')
+            except (BadZipFile,EOFError,RuntimeError,NotImplementedError,ZipDataError):
+                raise ImportFormatError('无法读取 ZIP，请使用未加密的 JSON 压缩文件') from None
         else:
-            raise ImportFormatError('聊天记录只接受官方 JSON 或 ZIP 导出包。Gemini 请在 Takeout 选择 JSON')
+            raise ImportFormatError('请选择官方 JSON 导出或 ZIP 压缩包。Gemini 请在 Takeout 选择 JSON')
 
 
 def gemini_days(documents, settings, temp_dir):
@@ -204,7 +207,7 @@ def iter_upload(source, uploads, settings, *, max_bytes=MAX_UPLOAD_BYTES,
                 max_json_bytes=MAX_JSON_BYTES, temp_dir=None):
     """Stream (filename, seekable binary file) pairs into one material at a time."""
     if source not in SOURCES:
-        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini、DeepSeek、Kelivo 导出或记忆文件')
+        raise ImportFormatError('只支持 ChatGPT、Claude、Gemini、DeepSeek、Kelivo、Operit 导出或记忆文件')
     files = upload_files(source,uploads,max_bytes)
     seen = {}
 
@@ -216,6 +219,9 @@ def iter_upload(source, uploads, settings, *, max_bytes=MAX_UPLOAD_BYTES,
             yield from deepseek_days(files,settings,max_json_bytes)
             return
         streams = documents(source,files,max_json_bytes)
+        if source == 'operit':
+            yield from operit_days(streams,settings)
+            return
         if source == 'gemini':
             yield from gemini_days(streams,settings,temp_dir)
             return

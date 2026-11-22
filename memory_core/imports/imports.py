@@ -9,10 +9,10 @@ from ..storage.clock import format_timestamp
 from ..storage.db import background_lock, connect
 from ..cards.drafts import DraftStore, ExtractionConfigurationChanged, MaterialExpired, context_digest, context_for
 from ..cards.extraction_contract import material_input
-from .import_formats import ImportDay, ImportFormatError, SOURCES
+from .import_formats import GROUPED_SOURCES, ImportDay, ImportFormatError, SOURCES
 from .import_preview import preview
 from ..storage.schema import (DEEPSEEK_IMPORT_VERSION, IMPORT_APPROVAL_VERSION, IMPORT_LIFECYCLE_VERSION, IMPORT_PROGRESS_VERSION,
-    IMPORT_VERSION, KELIVO_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION)
+    IMPORT_VERSION, KELIVO_IMPORT_VERSION, OPERIT_IMPORT_VERSION, STRUCTURE_CLAIM_VERSION)
 from ..storage.space import RevisionConflict, read_policy
 
 ACTIVE = ('queued', 'running')
@@ -38,6 +38,10 @@ class ImportStore(DraftStore):
         if self.schema_version < IMPORT_VERSION:
             raise ValueError('导入需要先升级记忆核心到版本 22')
 
+    @property
+    def _memory_entry_column(self):
+        return 'is_memory_entry' if self.schema_version >= OPERIT_IMPORT_VERSION else 'is_kelivo_memory'
+
     def _job(self, c, identifier, *, lock=False):
         identifier=UUID(str(identifier))
         row=c.execute('SELECT * FROM memory_core.import_jobs WHERE id=%s AND bot_id=%s'
@@ -47,10 +51,13 @@ class ImportStore(DraftStore):
         return row
 
     def _items(self, c, job, *, include_memory_text=False):
-        kelivo_columns = ',assistant_key,assistant_name,is_kelivo_memory' if job['source'] == 'kelivo' else ''
-        if kelivo_columns and include_memory_text:
-            kelivo_columns += ",CASE WHEN is_kelivo_memory THEN segments->0->>'text' END AS memory_text"
-        return c.execute(f'''SELECT conversation_key,title,business_date,source_key,message_count{kelivo_columns}
+        columns = ''
+        if job['source'] in GROUPED_SOURCES:
+            column = self._memory_entry_column
+            columns = f',assistant_key,assistant_name,{column} AS is_memory_entry'
+            if include_memory_text:
+                columns += f",CASE WHEN {column} THEN segments->0->>'text' END AS memory_text"
+        return c.execute(f'''SELECT conversation_key,title,business_date,source_key,message_count{columns}
             FROM memory_core.import_items WHERE job_id=%s AND bot_id=%s ORDER BY ordinal''',
             (job['id'],self.space_id)).fetchall()
 
@@ -66,9 +73,11 @@ class ImportStore(DraftStore):
     def create(self, source, items, *, now):
         if source not in SOURCES:
             raise ImportFormatError('导入来源与材料不符')
-        kelivo = source == 'kelivo'
-        if kelivo and self.schema_version < KELIVO_IMPORT_VERSION:
+        grouped = source in GROUPED_SOURCES
+        if source == 'kelivo' and self.schema_version < KELIVO_IMPORT_VERSION:
             raise ImportFormatError(f'请先升级记忆核心到版本 {KELIVO_IMPORT_VERSION}，再导入 Kelivo 备份')
+        if source == 'operit' and self.schema_version < OPERIT_IMPORT_VERSION:
+            raise ImportFormatError(f'请先升级记忆核心到版本 {OPERIT_IMPORT_VERSION}，再导入 Operit 备份')
         if source == 'deepseek' and self.schema_version < DEEPSEEK_IMPORT_VERSION:
             raise ImportFormatError(f'请先升级记忆核心到版本 {DEEPSEEK_IMPORT_VERSION}，再导入 DeepSeek 聊天记录')
         timestamp=format_timestamp(now,self.settings)
@@ -79,23 +88,23 @@ class ImportStore(DraftStore):
                 VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *''',
                 (uuid4(),self.space_id,source,context['policy_revision'],context_digest(context),timestamp,timestamp)).fetchone()
             with c.cursor() as cursor:
-                kelivo_columns = ',assistant_key,assistant_name,is_kelivo_memory' if kelivo else ''
-                kelivo_values = ',%s,%s,%s' if kelivo else ''
+                group_columns = f',assistant_key,assistant_name,{self._memory_entry_column}' if grouped else ''
+                group_values = ',%s,%s,%s' if grouped else ''
                 statement=f'''INSERT INTO memory_core.import_items
-                    (job_id,bot_id,ordinal,conversation_key,title,business_date,source_key,message_count,segments,created_at,updated_at{kelivo_columns})
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s{kelivo_values})'''
+                    (job_id,bot_id,ordinal,conversation_key,title,business_date,source_key,message_count,segments,created_at,updated_at{group_columns})
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s{group_values})'''
                 batch, size, total = [], 0, 0
                 for ordinal,item in enumerate(items):
-                    if item.source!=source or (item.is_kelivo_memory and not kelivo):
+                    if item.source!=source or (item.is_memory_entry and not grouped):
                         raise ImportFormatError('导入来源与材料不符')
                     material_input(item.segments,self.settings,item.business_date,
                                    allow_undated=item.business_date is None and (
-                                       (kelivo and item.is_kelivo_memory) or source=='memory'),
+                                       item.is_memory_entry or source=='memory'),
                                    partial_date=source=='memory')
                     row = (job['id'],self.space_id,ordinal,item.conversation_key,item.title,item.business_date,
                         item.source_key,item.message_count,Jsonb(item.segments),timestamp,timestamp)
-                    if kelivo:
-                        row += (item.assistant_key,item.assistant_name,item.is_kelivo_memory)
+                    if grouped:
+                        row += (item.assistant_key,item.assistant_name,item.is_memory_entry)
                     batch.append(row)
                     size += sum(len(segment['text'].encode('utf-8')) for segment in item.segments)
                     total += 1
@@ -350,7 +359,7 @@ class ImportStore(DraftStore):
         if item['segments'] is None:
             raise MaterialExpired('导入原材料已过期')
         request_key='request:'+item['source_key']
-        if job['source']=='memory' or item.get('is_kelivo_memory'):
+        if job['source']=='memory' or item.get(self._memory_entry_column):
             return self.submit_memory(item['source_key'],request_key,
                 item['segments'][0]['text'],item['business_date'],connection=c)
         return self.submit(item['source_key'],request_key,item['segments'],

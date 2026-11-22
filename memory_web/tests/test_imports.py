@@ -32,6 +32,7 @@ from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_deepseek_import import deepseek_session, deepseek_zip
 from memory_core.tests.test_import_formats import claude
 from memory_core.tests.test_kelivo_import import kelivo_backup
+from memory_core.tests.test_operit_import import operit_chat_export, operit_zip
 from memory_web.app import create_app
 from memory_web.config import WebSettings
 from memory_web.jobs.daily_jobs import DailyJobs
@@ -496,6 +497,59 @@ class WebImportTests(DatabaseTestCase):
         self.assertEqual(draft['error_code'], 'structure:format')
         self.assertIsNone(draft['business_date'])
         self.assertIsNone(draft['payload'])
+
+    def test_operit_combined_import_previews_filters_processes_and_deduplicates(self):
+        archive = operit_zip()
+        response = self.upload('operit', archive, 'both.zip')
+        self.assertEqual(response.status_code, 200, response.text)
+        endpoint = self.path + '/' + response.json()['id']
+        initial = self.post(endpoint + '/preview').json()
+        self.assertEqual(initial['material_count'], 0)
+        self.assertEqual(self.responses.calls, [])
+        chats = {group['name']: group['conversations'] for group in initial['assistant_groups']}
+        self.assertEqual(set(chats), {'合成角色卡甲', '合成角色卡乙'})
+        memories = initial['memory_groups'][0]['memories']
+        self.assertTrue(all(not entry['selected'] for entry in memories))
+        selection = dict(
+            selected_conversations=[chats['合成角色卡甲'][0]['key']],
+            selected_memories=[entry['key'] for entry in memories if entry['title'] in ('合成自动抽取', '合成人工条目')],
+            date_end='2025-03-13',
+        )
+        plan = self.post(endpoint + '/preview', selection).json()
+        self.assertEqual((plan['material_count'], plan['message_count'], plan['memory_count']), (3, 2, 2))
+        self.assertEqual(self.post(endpoint + '/confirm', selection).json()['status'], 'queued')
+        self.drain()
+        job = self.http.get(endpoint).json()
+        self.assertEqual((job['status'], job['progress']['processed'], job['progress']['failed']), ('completed', 3, 0))
+        chat = next(material for stage, material in self.responses.calls if stage == 'selection')
+        self.assertEqual([segment['text'] for segment in chat['segments']],
+                         ['合成原话：今天开始学陶艺。', '合成选中回复。'])
+        self.assertCountEqual([material for stage, material in self.responses.calls
+                               if stage == 'structure' and 'title' not in material], [
+            {'content': '合成自动抽取\n\n合成记忆正文。', 'source_date': '2025-03-14'},
+            {'content': '合成人工条目\n\n合成记忆正文。', 'source_date': None},
+        ])
+        with connect(self.app) as connection:
+            drafts = connection.execute("""SELECT p.payload->>'source_date' AS day
+                FROM memory_core.pending_memories p
+                JOIN memory_core.material_extractions e ON (p.extraction_id,p.bot_id)=(e.id,e.bot_id)
+                JOIN memory_core.source_materials s ON (e.material_id,e.bot_id)=(s.id,s.bot_id)
+                WHERE s.material_kind='memory'""").fetchall()
+        self.assertCountEqual([draft['day'] for draft in drafts], ['2025-03-14', None])
+        repeated = self.upload('operit', archive, 'renamed.zip')
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        plan = self.post(self.path + '/' + repeated.json()['id'] + '/preview', selection).json()
+        self.assertEqual((plan['material_count'], plan['skipped_count']), (0, 3))
+
+    def test_operit_late_invalid_header_rolls_back_upload(self):
+        data = operit_chat_export()
+        response = self.upload('operit', json.dumps(dict(
+            chats=data['chats'], archiveType=data['archiveType'], formatVersion=3,
+        )).encode(), 'chat_backup.json')
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn('版本 2', response.json()['detail'])
+        self.assertEqual(self.http.get(self.path).json()['jobs'], [])
+        self.assertEqual(self.responses.calls, [])
 
     def test_progress_estimate_measures_only_the_current_import_run(self):
         clock = [datetime(2026, 4, 1, tzinfo=timezone.utc)]

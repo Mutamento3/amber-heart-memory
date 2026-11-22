@@ -14,6 +14,7 @@ from memory_core.storage.space import Participant, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
 from memory_core.tests.test_deepseek_import import deepseek_zip
 from memory_core.tests.test_kelivo_import import kelivo_backup
+from memory_core.tests.test_operit_import import operit_zip
 
 
 class ImportUpgradeTests(DatabaseTestCase):
@@ -113,4 +114,32 @@ class ImportUpgradeTests(DatabaseTestCase):
         self.assertEqual(upgraded.preview(job['id'])['material_count'], 1)
         upgraded.discard(job['id'])
         self.assertEqual(upgraded.list_jobs(), [])
+        self.assertFalse(install(self.owner, settings))
+
+    def test_v31_queued_kelivo_memory_still_runs_after_operit_upgrade(self):
+        settings = Settings(3)
+        install(self.owner, settings, target_version=31)
+        SpaceConfiguration(self.owner).configure('one', Participant('合成读者'), Participant('合成助手'))
+        store = ImportStore(self.app, 'one')
+        now = datetime.now(timezone.utc)
+        operit = parse_upload('operit', [('synthetic.zip', operit_zip())], settings)
+        with self.assertRaisesRegex(ImportFormatError, '版本 32'):
+            store.create('operit', operit, now=now)
+        backup = kelivo_backup(multiple_assistants=True, with_memories=True)
+        items = parse_upload('kelivo', [('synthetic.zip', backup)], settings)
+        job = store.create('kelivo', items, now=now)
+        undated = next(item for item in items if item.is_memory_entry and item.business_date is None)
+        store.confirm(job['id'], now=now, selected_conversations=[], selected_memories=[undated.source_key])
+
+        self.assertTrue(install(self.owner, settings))
+        upgraded = ImportStore(self.app, 'one')
+        item = upgraded.prepare_next(job['id'], now=now)
+        self.assertEqual(item['source_key'], undated.source_key)
+        self.assertTrue(item['is_memory_entry'])
+        with connect(self.app) as connection:
+            material = connection.execute('SELECT material_kind,business_date FROM memory_core.source_materials WHERE source_key=%s',
+                                          (undated.source_key,)).fetchone()
+        self.assertEqual(material, dict(material_kind='memory', business_date=None))
+        new = upgraded.create('operit', operit, now=now)
+        self.assertEqual(len(upgraded.preview(new['id'])['assistant_groups']), 2)
         self.assertFalse(install(self.owner, settings))

@@ -416,7 +416,7 @@ Operit：MCP 配置页 →“导入”→“远程”，“主机地址”填完
 
 ## 导入（第 6 块）
 
-设置页“导入记忆”分区进入 `/imports` 二级页，不占底部导航。ChatGPT、Claude、Gemini、DeepSeek 和 Kelivo 都可直接选择完整的导出 ZIP。浏览器从 ZIP 中筛选所需条目，再上传精简后的 ZIP。浏览器无法处理、ZIP64 或加密等情况走原包上传。原有单 JSON 上传入口仍可用。Claude 支持 `chat_messages/messages` 与 `sender/role`。ChatGPT 和 Claude 默认选中全部对话，可取消不需要的对话。Gemini 在 Takeout 的 My Activity → Gemini Apps 选择 JSON，按安装配置切分后的业务日期范围选择，范围内的普通聊天和 Gem 聊天都导入，不提供 Gem 筛选。DeepSeek 需要核心版本 27，上传完整的官方 ZIP（格式版本 1）。预览按对话列出，默认全选。只取当前分支的聊天文字。Kelivo 需要核心版本 25，支持未加密的 ZIP 备份。聊天预览按助手分组，可以选择多个助手或单独勾选对话，并限制业务日期范围。有多个聊天组时默认空选。备份包含「记忆」时，预览会另列可展开的助手和全局记忆组，条目默认不勾选。勾选后每条直接整理成一张普通记忆卡，归档条目跳过。新版条目用安装时区的日历日期并按条目 ID 防重，旧条目保留空日期并按内容防重。记忆文件示例：
+设置页“导入记忆”分区进入 `/imports` 二级页，不占底部导航。ChatGPT、Claude、Gemini、DeepSeek 和 Kelivo 都可直接选择完整的导出 ZIP。Operit 接受聊天记录或记忆库 JSON，也可以在浏览器里同时选两个 JSON，或选包含导出 JSON 的 ZIP。浏览器从 ZIP 中筛选所需条目，再上传精简后的 ZIP。浏览器无法处理、ZIP64 或加密等情况走原包上传。原有单 JSON 上传入口仍可用。Claude 支持 `chat_messages/messages` 与 `sender/role`。ChatGPT 和 Claude 默认选中全部对话，可取消不需要的对话。Gemini 在 Takeout 的 My Activity → Gemini Apps 选择 JSON，按安装配置切分后的业务日期范围选择，范围内的普通聊天和 Gem 聊天都导入，不提供 Gem 筛选。DeepSeek 需要核心版本 27，上传完整的官方 ZIP（格式版本 3）。预览按对话列出，默认全选。只取当前分支的聊天文字。Kelivo 需要核心版本 25，支持未加密的 ZIP 备份。聊天预览按助手分组，可以选择多个助手或单独勾选对话，并限制业务日期范围。有多个聊天组时默认空选。备份包含「记忆」时，预览会另列可展开的助手和全局记忆组，条目默认不勾选。勾选后每条直接整理成一张普通记忆卡，归档条目跳过。Kelivo 新版条目按条目 ID 防重，其中工具写入和自动提取的条目取安装时区的创建日期，手动、提炼条目保留空日期。旧条目日期为空并按内容防重。Operit 需要核心版本 32，聊天按角色卡分组，沿用相同的对话选择和日期筛选。纯文本记忆独立勾选，默认不选，只有记忆分析生成的条目取安装时区的创建日期。记忆文件示例：
 
 ```markdown
 ## 2025-03-14
@@ -436,7 +436,7 @@ Operit：MCP 配置页 →“导入”→“远程”，“主机地址”填完
 
 待审草稿按竖向列表展开，编辑、拒绝和收录针对单卡。整理失败会显示原因，也可只重跑该卡的结构整理。记忆文件的正文按共享成文规则决定是否改写，留存的原文可以在卡片详情展开。导入不会补写日记，也不提供整批撤回。已结束的月份按内容日期进入现有园丁窗口。导入原文不会进入聊天历史、摘要或日记，已审核卡片仍正常参与记忆召回。防重和原材料保留规则见[核心导入](../memory_core/README.md#导入版本-22)。
 
-管理员接口：`GET /api/spaces/{space}/imports` 查看配置与进度，`POST .../imports/upload?source=chatgpt|claude|gemini|deepseek|kelivo|memory&filename=...` 以 `application/octet-stream` 上传一个原文件，`GET .../imports/{id}` 查看任务，`POST .../{id}/preview` / `confirm` 接收 `selected_conversations` 或 `date_start/date_end`，Kelivo 可同时传聊天对话、聊天日期及 `selected_memories`，预览返回 `assistant_groups` 和 `memory_groups`，`confirm` 可另传布尔值 `auto_approve`，`POST .../{id}/retry` 以及 `POST .../{id}/stop`、`/discard`、`/end` 接收空对象。其余操作保持 JSON；全部使用管理员 Cookie、Origin 和 CSRF，不接受空间访问钥匙。实际请求体上限为 90 MiB，nginx 样例同步限制为 90m。ZIP 内相关 JSON 解压后累计上限为 1 GiB，Kelivo 聊天数据库解压后上限同为 1 GiB。JSON 使用流式解析并分批入队，Kelivo 把备份数据库流式解压到磁盘后只读打开，缺少记忆表时从 `settings.json` 读取对应的记忆列表。确认只读元数据，首次打开 Kelivo 预览也会读取记忆条目正文供用户选择。上传、Gemini 按日排序和 Kelivo 数据库的临时文件放在密码文件所在的私有状态目录（默认是磁盘 app_state 卷），该目录须可写，完成或出错后清除临时文件。不要把此目录改为 tmpfs，否则磁盘暂存仍会占用容器内存。
+管理员接口：`GET /api/spaces/{space}/imports` 查看配置与进度，`POST .../imports/upload?source=chatgpt|claude|gemini|deepseek|kelivo|operit|memory&filename=...` 以 `application/octet-stream` 上传一个原文件，`GET .../imports/{id}` 查看任务，`POST .../{id}/preview` / `confirm` 接收 `selected_conversations` 或 `date_start/date_end`，Kelivo 和 Operit 可同时传聊天对话、聊天日期及 `selected_memories`，预览返回 `assistant_groups` 和 `memory_groups`，`confirm` 可另传布尔值 `auto_approve`，`POST .../{id}/retry` 以及 `POST .../{id}/stop`、`/discard`、`/end` 接收空对象。其余操作保持 JSON；全部使用管理员 Cookie、Origin 和 CSRF，不接受空间访问钥匙。实际请求体上限为 90 MiB，nginx 样例同步限制为 90m。ZIP 内相关 JSON 解压后累计上限为 1 GiB，Kelivo 聊天数据库解压后上限同为 1 GiB。JSON 使用流式解析并分批入队，Kelivo 把备份数据库流式解压到磁盘后只读打开，缺少记忆表时从 `settings.json` 读取对应的记忆列表。确认只读元数据，首次打开 Kelivo 或 Operit 预览也会读取记忆条目正文供用户选择。上传、Gemini 按日排序和 Kelivo 数据库的临时文件放在密码文件所在的私有状态目录（默认是磁盘 app_state 卷），该目录须可写，完成或出错后清除临时文件。不要把此目录改为 tmpfs，否则磁盘暂存仍会占用容器内存。
 
 ## 新版本提醒与记忆说明
 

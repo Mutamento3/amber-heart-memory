@@ -12,8 +12,9 @@ from ..storage.clock import business_day_label, format_timestamp
 
 MAX_UPLOAD_BYTES = 90 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024 * 1024
-ImportSource = Literal["chatgpt", "claude", "gemini", "deepseek", "kelivo", "memory"]
+ImportSource = Literal["chatgpt", "claude", "gemini", "deepseek", "kelivo", "operit", "memory"]
 SOURCES = frozenset(get_args(ImportSource))
+GROUPED_SOURCES = frozenset(("kelivo", "operit"))
 
 
 class ImportFormatError(ValueError):
@@ -37,7 +38,7 @@ class ImportDay:
     message_count: int | None = None
     assistant_key: str | None = None
     assistant_name: str | None = None
-    is_kelivo_memory: bool = False
+    is_memory_entry: bool = False
     memory_text: str | None = None
 
     def __post_init__(self):

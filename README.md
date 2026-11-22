@@ -401,6 +401,7 @@ cd amber-heart-memory
 - [Gemini](docs/import/gemini.md)
 - [DeepSeek](docs/import/deepseek.md)
 - [Kelivo](docs/import/kelivo.md)（聊天和记忆）
+- [Operit](docs/import/operit.md)（聊天和记忆）
 - [你自己整理的记忆文件](docs/import/memory-file.md)
 
 ## 接入聊天 App

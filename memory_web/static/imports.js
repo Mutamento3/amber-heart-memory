@@ -1,8 +1,9 @@
-import {prepareImportUpload} from "./import-zip.js?v=1";
+import {packOperitFiles, prepareImportUpload} from "./import-zip.js?v=2";
 
-const names = {chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek", kelivo: "Kelivo", memory: "自己整理的记忆"};
-const usesDateRange = source => source === "gemini" || source === "kelivo";
-const usesConversationSelection = source => ["chatgpt", "claude", "deepseek", "kelivo"].includes(source);
+const names = {chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini", deepseek: "DeepSeek", kelivo: "Kelivo", operit: "Operit", memory: "自己整理的记忆"};
+const usesGroups = source => source === "kelivo" || source === "operit";
+const usesDateRange = source => source === "gemini" || usesGroups(source);
+const usesConversationSelection = source => usesGroups(source) || ["chatgpt", "claude", "deepseek"].includes(source);
 const statuses = {preview: "待确认", queued: "排队中", running: "处理中", completed: "已完成", failed: "已暂停"};
 const MEMORY_SAMPLE = `## 2025-03-14
 小雨和阿言第一次一起去看海。出发前阿言说要在海边看日出，结果两人都睡过了头，赶到时太阳已经老高了。那天风很大，小雨的帽子被吹进海里，阿言笑了她一路，说以后每年都要来，补上那次日出。
@@ -47,12 +48,14 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   const help = () => {
     const source = $("#import-source").value;
     $("#import-file").accept = ({memory: ".md,.txt", deepseek: ".zip", kelivo: ".zip,.kbackup"})[source] || ".json,.zip";
+    $("#import-file").multiple = source === "operit";
     $("#import-help").textContent = ({
       chatgpt: "直接选择官方导出 ZIP。只读取最终选定的聊天分支。",
       claude: "直接选择 Claude 官方导出 ZIP。预览时可以按对话选择。",
       gemini: "在 Google Takeout 的 My Activity → Gemini Apps 选择 JSON 格式，再直接选择导出 ZIP。日期范围内的普通聊天和 Gem 聊天都会导入。",
       deepseek: "上传完整的 DeepSeek 官方导出 ZIP（格式版本 3）。只导入当前选择分支的聊天文字。",
       kelivo: "在 Kelivo 选择「聊天记录」和「助手」。想导入记忆时再选「记忆」。上传未加密的 ZIP。接入 Amber Heart 之后的聊天已经记录过了，导入时把结束日期选在接入之前。",
+      operit: "在 Operit 的「设置 → 数据备份与恢复」里，分别导出「聊天记录」的 JSON 或「记忆库」。可以选一个 JSON、同时选两个 JSON，或上传装有导出文件的 ZIP。接入 Amber Heart 之后的聊天已经记录过了，导入时把结束日期选在接入之前。",
       memory: "每条以 ## 日期 开头，下面写正文，可以写多行。只记得月份或年份就写 ## 2025-03 或 ## 2025，不记得日期写 ## 未注明；支持 .md 和 .txt 文件。用名字来写，不要用“我”“他”，设置里填的名字或又名都可以。写得越具体，整理出来的卡片越有用。也可以把下面的示例发给你的 AI，让它照这个格式帮你整理。",
     })[source];
     $("#import-sample").hidden = source !== "memory";
@@ -60,9 +63,9 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   $("#import-sample pre").textContent = MEMORY_SAMPLE;
   help();
   const showFileName = () => {
-    const file = $("#import-file").files[0];
-    $("#import-file-name").textContent = file ? file.name : "未选择文件";
-    $("#import-file-name").classList.toggle("muted", !file);
+    const names = [...$("#import-file").files].map(file => file.name);
+    $("#import-file-name").textContent = names.join("、") || "未选择文件";
+    $("#import-file-name").classList.toggle("muted", !names.length);
   };
   $("#pick-import-file").onclick = () => $("#import-file").click();
   $("#import-file").onchange = showFileName;
@@ -76,7 +79,7 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     if (usesConversationSelection(plan.source)) {
       filters.selected_conversations = $$("[data-import-conversation]:checked").map(input => input.value);
     }
-    if (plan.source === "kelivo") {
+    if (usesGroups(plan.source)) {
       filters.selected_memories = $$("[data-import-memory]:checked").map(input => input.value);
     }
     return filters;
@@ -90,9 +93,10 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     </label>`;
   }
   function conversationChoices() {
-    if (plan.source === "kelivo") {
+    if (usesGroups(plan.source)) {
       if (!plan.assistant_groups.length) return "";
-      return `<p class="meta">勾选要导入的助手或对话，可以同时选多个助手。</p>${assistantChoices(plan.assistant_groups, "conversations")}`;
+      const group = plan.source === "operit" ? "角色卡" : "助手";
+      return `<p class="meta">勾选要导入的${group}或对话，可以同时选多个${group}。</p>${assistantChoices(plan.assistant_groups, "conversations")}`;
     }
     if (!usesConversationSelection(plan.source)) return "";
     return `<div class="import-select-actions"><button type="button" class="quiet" id="select-all-imports">全选</button><button type="button" class="quiet" id="select-no-imports">取消全选</button></div>
@@ -124,9 +128,9 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
     return `<div class="import-conversations">${markup.join("")}</div>`;
   }
   function memoryChoices() {
-    if (plan.source !== "kelivo" || !plan.memory_groups.length) return "";
+    if (!usesGroups(plan.source) || !plan.memory_groups.length) return "";
     const count = plan.memory_groups.reduce((total, group) => total + group.memories.length, 0);
-    return `<section class="import-memory-section"><div class="panelhead"><h3>Kelivo 记忆 ${count} 条</h3></div>
+    return `<section class="import-memory-section"><div class="panelhead"><h3>${names[plan.source]} 记忆 ${count} 条</h3></div>
       <p class="meta">聊天还在的话导聊天就够了，聊天删掉的可以用记忆补回来。</p>
       ${plan.memory_groups.some(group => group.name === "全局记忆") ? '<p class="meta">全局记忆可能涉及多个助手，可以展开后按条挑选。</p>' : ""}
       ${assistantChoices(plan.memory_groups, "memories")}
@@ -134,9 +138,10 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   }
   function counts() {
     const calls = plan.model_calls_min === plan.model_calls_max ? `${plan.model_calls_max}` : `${plan.model_calls_min}～${plan.model_calls_max}`;
-    const showChat = plan.source !== "memory" && (plan.source !== "kelivo" || plan.first_date);
-    const showMemory = plan.source === "memory" || (plan.source === "kelivo" && plan.memory_groups.length);
-    $("#import-counts").innerHTML = `${plan.source !== "kelivo" || showChat ? `<span><strong>${plan.day_count}</strong> 天</span>` : ""}
+    const grouped = usesGroups(plan.source);
+    const showChat = plan.source !== "memory" && (!grouped || plan.first_date);
+    const showMemory = plan.source === "memory" || (grouped && plan.memory_groups.length);
+    $("#import-counts").innerHTML = `${!grouped || showChat ? `<span><strong>${plan.day_count}</strong> 天</span>` : ""}
       ${showChat ? `<span><strong>${plan.message_count}</strong> 条消息</span>` : ""}
       ${showMemory ? `<span><strong>${plan.memory_count}</strong> 条记忆</span>` : ""}
       <span><strong>${calls}</strong> 次模型调用</span>`;
@@ -164,9 +169,10 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
       ? `<div class="import-range"><label>从哪天<input type="date" id="import-start" value="${esc(plan.first_date)}" min="${esc(plan.first_date)}" max="${esc(plan.last_date)}"></label><label>到哪天<input type="date" id="import-end" value="${esc(plan.last_date)}" min="${esc(plan.first_date)}" max="${esc(plan.last_date)}"></label></div>`
       : "";
     const choices = range + conversationChoices() + memoryChoices();
-    const modelInfo = plan.source === "memory" || (plan.source === "kelivo" && !plan.first_date)
+    const grouped = usesGroups(plan.source);
+    const modelInfo = plan.source === "memory" || (grouped && !plan.first_date)
       ? "每条记忆调用一次整理。"
-      : plan.source === "kelivo" && plan.memory_groups.length
+      : grouped && plan.memory_groups.length
         ? "聊天先挑选再整理成卡，每条记忆直接整理一次。"
         : "先挑选，再按结果整理成卡，调用次数显示预计范围。";
     const panel = $("#import-preview");
@@ -303,21 +309,27 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
   }
   $("#import-upload").onsubmit = async event => {
     event.preventDefault();
-    const file = $("#import-file").files[0];
+    const files = [...$("#import-file").files];
+    const [file] = files;
     if (!file) return showError(new Error("请先选择文件。"));
     const source = $("#import-source").value;
+    if (files.length > 1 && (files.length !== 2 || files.some(file => !/\.json$/i.test(file.name)))) {
+      return showError(new Error("请选择一个 ZIP，或同时选择聊天和记忆的两个 JSON。"));
+    }
     $("#import-error").textContent = "";
     $("#import-upload fieldset").disabled = true;
-    $("#upload-preview").textContent = "正在准备聊天数据…";
+    $("#upload-preview").textContent = "正在准备导入数据…";
     try {
-      const upload = await prepareImportUpload(source, file);
+      const max = Math.round(config.max_upload_bytes / 1024 / 1024);
+      const checkSize = size => {
+        if (size > config.max_upload_bytes) throw new Error(`实际上传的内容超过 ${max} MiB 上限。`);
+      };
+      if (files.length > 1) checkSize(files[0].size + files[1].size);
+      const upload = files.length > 1 ? await packOperitFiles(files) : await prepareImportUpload(source, file);
       if (!live()) return;
-      if (upload.size > config.max_upload_bytes) {
-        const max = Math.round(config.max_upload_bytes / 1024 / 1024);
-        throw new Error(`实际上传的内容超过 ${max} MiB 上限。`);
-      }
+      checkSize(upload.size);
       $("#upload-preview").textContent = upload === file && /\.zip$/i.test(file.name) ? "正在上传原包…" : "正在上传…";
-      const query = new URLSearchParams({source, filename: file.name});
+      const query = new URLSearchParams({source, filename: upload.name ?? file.name});
       const job = await api(url(`/imports/upload?${query}`), {method: "POST", file: upload});
       if (!live()) return;
       await openPreview(job.id);

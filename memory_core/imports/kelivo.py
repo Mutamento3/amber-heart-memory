@@ -108,7 +108,7 @@ def _settings_assistant_names(archive):
 
 def _memory_days(entries, names, settings, *, legacy=False):
     zone = ZoneInfo(settings.timezone)
-    for identifier, scope, assistant_id, status, content, stamp in entries:
+    for identifier, scope, assistant_id, status, content, stamp, source in entries:
         if status == "archived":
             continue
         if status != "active" or scope not in ("global", "assistant") or not isinstance(content, str):
@@ -120,9 +120,11 @@ def _memory_days(entries, names, settings, *, legacy=False):
             day = None
             key = _hash("legacy:" + body)
         else:
-            if type(stamp) is not int:
-                raise ImportFormatError(INVALID_MEMORY)
-            day = (EPOCH + timedelta(microseconds=stamp)).astimezone(zone).date().isoformat()
+            day = None
+            if source in ("tool", "extracted"):
+                if type(stamp) is not int:
+                    raise ImportFormatError(INVALID_MEMORY)
+                day = (EPOCH + timedelta(microseconds=stamp)).astimezone(zone).date().isoformat()
             key = _hash("entry:" + _identifier(identifier))
         if scope == "global":
             assistant_key, assistant_name = "global", "全局记忆"
@@ -132,17 +134,17 @@ def _memory_days(entries, names, settings, *, legacy=False):
         title = body if len(body) <= 120 else body[:120] + "…"
         yield ImportDay("kelivo", key, title, day, f"import:kelivo-memory:{key}",
                         [dict(segment_id="m-0", speaker="user", text=body, timestamp=None)],
-                        assistant_key=assistant_key, assistant_name=assistant_name, is_kelivo_memory=True)
+                        assistant_key=assistant_key, assistant_name=assistant_name, is_memory_entry=True)
 
 
 def _settings_memory_rows(archive):
     return ((row.get("id"), row.get("scope"), row.get("assistantId"), row.get("status", "active"),
-             row.get("content"), row.get("createdAt"))
+             row.get("content"), row.get("createdAt"), row.get("source"))
             for row in _settings_list(archive, "memory_entries_v1"))
 
 
 def _settings_legacy_rows(archive):
-    return ((None, "assistant", row.get("assistantId"), "active", row.get("content"), None)
+    return ((None, "assistant", row.get("assistantId"), "active", row.get("content"), None, None)
             for row in _settings_list(archive, LEGACY_MEMORY_KEY))
 
 
@@ -168,7 +170,8 @@ def _database_days(path, settings, archive):
                               assistant_name=names.get(assistant_id))
         if "memory_entry_rows" in tables:
             entries = db.execute("""
-                SELECT id, scope, assistant_id, status, content, entry_created_at
+                SELECT id, scope, assistant_id, status, content, entry_created_at,
+                    CASE WHEN json_valid(payload) THEN json_extract(payload, '$.source') END
                 FROM memory_entry_rows WHERE status = 'active'
             """)
         else:
@@ -176,7 +179,7 @@ def _database_days(path, settings, archive):
         yield from _memory_days(entries, names, settings)
         if "assistant_memory_rows" in tables:
             entries = db.execute("""
-                SELECT NULL, 'assistant', assistant_id, 'active', json_extract(payload, '$.content'), NULL
+                SELECT NULL, 'assistant', assistant_id, 'active', json_extract(payload, '$.content'), NULL, NULL
                 FROM assistant_memory_rows ORDER BY sort_order, id
             """)
         else:

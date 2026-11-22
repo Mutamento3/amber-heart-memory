@@ -370,7 +370,7 @@ python3 memory_core/dev/environment.py destroy
 
 ## 导入（版本 22）
 
-`ImportStore` 在独立的 `import_jobs` / `import_items` 保存预览、选择和处理进度，`source_materials.material_kind` 明确区分聊天与用户记忆。`iter_upload` 以 ijson 流式逐条解析官方 ChatGPT/Claude/Gemini 的 JSON（ZIP 成员通过 `archive.open` 流式读取），以及 UTF-8 的 `## YYYY-MM-DD` 加正文文件；不读附件、思考或工具调用。ChatGPT 只从 `current_node` 回溯采用分支，支持分片；Claude 兼容两套消息键名；Gemini 从 `Prompted ` 标题取提问，把 `safeHtmlItem` 回答转成纯文本，跳过反馈等活动，不把附件提示或 Gem 名加入原文。核心版本 27 支持 DeepSeek 官方 ZIP 格式版本 1。逐个读取目录里列出的对话，沿 `current_message_id` 回溯当前分支，只保留正常提问和回复的文字。账号信息与附件条目保持未打开，超时消息与附加提示跳过。
+`ImportStore` 在独立的 `import_jobs` / `import_items` 保存预览、选择和处理进度，`source_materials.material_kind` 明确区分聊天与用户记忆。`iter_upload` 以 ijson 流式逐条解析官方 ChatGPT/Claude/Gemini 的 JSON（ZIP 成员通过 `archive.open` 流式读取），以及 UTF-8 的 `## YYYY-MM-DD` 加正文文件；不读附件、思考或工具调用。ChatGPT 只从 `current_node` 回溯采用分支，支持分片；Claude 兼容两套消息键名；Gemini 从 `Prompted ` 标题取提问，把 `safeHtmlItem` 回答转成纯文本，跳过反馈等活动，不把附件提示或 Gem 名加入原文。核心版本 27 支持 DeepSeek 官方 ZIP 格式版本 3。逐个读取目录里列出的对话，沿 `current_message_id` 回溯当前分支，只保留正常提问和回复的文字。账号信息与附件条目保持未打开，超时消息与附加提示跳过。版本 32 支持 Operit 聊天 JSON v2 和记忆库 JSON。聊天按角色卡预览，取用户和 AI 消息的选用版本，跳过思考、工具内容和总结，图片和文件用占位文字；记忆库仅处理纯文本条目，标题和正文一起整理，按条目 UUID 防重。
 
 聊天按安装时区与业务日分界拆成“来源对话 × 日期”，原消息时间保留在证据中，走现有两步抽卡和全空间每日额度。记忆文件按用户指定日期保留每条正文（版本 30 起日期可以只写年 `## 2025`、年月 `## 2025-03`，或写 `## 未注明` 不给日期；卡片原样存这个日期，按日期筛选时按整段时间计算，月度主题总结按该段时间的第一天排序；聊天材料仍须精确到天），`submit_memory` 跳过挑选和评分门槛，由第二步补标题、摘要、主题与图谱，并按每日抽卡共用的成文规则决定是否改写表达；不占聊天每日额度。其 importance=10 只满足现有待审数据协议，不调用模型评分。两种第二步共用 `prompts/extraction.md` 的完整结构规则，`structure_variants.json` 只保留角色、成文边界、日期、输出字段与输入说明的差异；测试锁住聊天版本的完整渲染，除已批准的“不输出 mixed，也不拆分本卡”段落外，与拆分前逐字一致。
 

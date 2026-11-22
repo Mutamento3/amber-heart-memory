@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from .import_formats import ImportFormatError
+from .import_formats import GROUPED_SOURCES, ImportFormatError
 
 
 def _date(value):
@@ -60,25 +60,26 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
     if type(daily_limit) is not int or daily_limit <= 0:
         raise ImportFormatError("每日抽卡额度必须是正整数")
     source = items[0].source
-    by_conversation = source in ("chatgpt", "claude", "deepseek", "kelivo")
-    conversations_items = [item for item in items if not item.is_kelivo_memory]
-    memory_items = [item for item in items if item.is_kelivo_memory]
+    grouped = source in GROUPED_SOURCES
+    by_conversation = grouped or source in ("chatgpt", "claude", "deepseek")
+    conversations_items = [item for item in items if not item.is_memory_entry]
+    memory_items = [item for item in items if item.is_memory_entry]
     used_per_day = used_per_day or {}
     if any(type(value) is not int or value < 0 for value in used_per_day.values()):
         raise ImportFormatError("已有每日候选数量无效")
     date_start, date_end = _date(date_start), _date(date_end)
     if date_start and date_end and date_start > date_end:
         raise ImportFormatError("开始日期不能晚于结束日期")
-    if source not in ("gemini", "kelivo") and (date_start or date_end):
-        raise ImportFormatError("只有 Gemini 和 Kelivo 按日期范围选择")
+    if not grouped and source != "gemini" and (date_start or date_end):
+        raise ImportFormatError("只有 Gemini、Kelivo 和 Operit 按日期范围选择")
     if not by_conversation and selected_conversations is not None:
         raise ImportFormatError("该来源不按对话选择")
-    if source != "kelivo" and selected_memories is not None:
+    if not grouped and selected_memories is not None:
         raise ImportFormatError("该来源不单独选择记忆条目")
     keys = {item.conversation_key for item in conversations_items}
     if selected_conversations is None:
         # Require an explicit choice when a backup contains several groups.
-        multiple = source == "kelivo" and len({item.assistant_key for item in conversations_items}) > 1
+        multiple = grouped and len({item.assistant_key for item in conversations_items}) > 1
         selected = set() if multiple else keys
     else:
         selected = _selected_keys(selected_conversations, keys, "选择了不存在的来源对话")
@@ -122,7 +123,7 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
                 duplicates += 1
             else:
                 chosen.append(item)
-    chats = [item for item in chosen if not item.is_kelivo_memory]
+    chats = [item for item in chosen if not item.is_memory_entry]
     days = {item.business_date for item in chats}
     minimum = len(chosen)
     dates = [item.business_date for item in conversations_items if item.business_date is not None]
@@ -132,7 +133,7 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
         max(0, daily_limit - used_per_day.get(day, 0)) for day in days)
     result = dict(
         source=source,
-        conversations=ordered if source != "kelivo" else [],
+        conversations=[] if grouped else ordered,
         first_date=min(dates, default=None),
         last_date=max(dates, default=None),
         date_start=date_start, date_end=date_end,
@@ -144,8 +145,8 @@ def preview(items, *, daily_limit, used_per_day=None, imported_keys=(),
         model_calls_min=minimum, model_calls_max=maximum,
         model_calls_with_retry_max=maximum * 2,
     )
-    if source == "kelivo":
-        assistants = {item.source_key if item.is_kelivo_memory else item.conversation_key:
+    if grouped:
+        assistants = {item.source_key if item.is_memory_entry else item.conversation_key:
                       (item.assistant_key, item.assistant_name) for item in items}
         names = _assistant_names(ordered + memories, assistants)
         result["assistant_groups"] = _assistant_groups(ordered, assistants, names, "conversations")

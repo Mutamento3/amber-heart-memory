@@ -16,7 +16,7 @@ Chats after you connected to Amber Heart have already been recorded. Set the imp
 
 If the backup has no name for an assistant, the preview shows a numbered label such as **助手 1** (Assistant 1) and a few conversation titles to help you identify it. Conversations without an assigned assistant appear under **未归属** (Unassigned).
 
-If your chats are still in Kelivo, importing the chats is enough. Use memories to recover details from chats you deleted. Legacy memories with no date stay undated.
+If your chats are still in Kelivo, importing the chats is enough. Use memories to recover details from chats you deleted. For tool-created and extracted entries in newer backups, Amber Heart uses the entry's creation date in the installation time zone. Manual, distilled, and legacy memories are imported without a date.
 
 Amber Heart imports text messages from you and the AI, using the selected version when available. To import chats from an older `chats.json` backup, update Kelivo and create a new backup.
 

@@ -55,6 +55,7 @@ class BrowserImportZipTests(unittest.TestCase):
 
     def setUp(self):
         self.jobs, self.uploads, self.actions = [], [], []
+        self.upload_filenames = []
         self.page = self.browser.new_page(viewport={"width": 375, "height": 812})
         self.page.add_init_script("try{localStorage.setItem('amber-guide-seen','1')}catch(e){}")
         self.addCleanup(self.page.close)
@@ -78,7 +79,9 @@ class BrowserImportZipTests(unittest.TestCase):
             return route.fulfill(json=dict(jobs=self.jobs, configured=True, lifecycle_supported=True,
                 max_upload_bytes=90 * 1024 ** 2, max_json_bytes=1024 ** 3))
         if url.path == "/imports/upload":
-            self.uploads.append((parse_qs(url.query)["source"][0], route.request.post_data_buffer))
+            query = parse_qs(url.query)
+            self.uploads.append((query["source"][0], route.request.post_data_buffer))
+            self.upload_filenames.append(query["filename"][0])
             return route.fulfill(json={"id": "synthetic"})
         if url.path.endswith("/preview"):
             identifier = url.path.split("/")[-2]
@@ -134,6 +137,26 @@ class BrowserImportZipTests(unittest.TestCase):
                     self.assertEqual({entry: archive.read(entry) for entry in archive.namelist()}, dict(expected))
         raw = b'[{"synthetic":true}]'
         self.assertEqual(self.upload("chatgpt", raw, name="conversations.json"), raw)
+
+    def test_operit_uploads_single_json_or_two_files_and_filters_existing_zip(self):
+        self.page.goto(ORIGIN)
+        chats = b'{"archiveType":"operit_chat_archive","formatVersion":2,"chats":[]}'
+        memories = b'{"memories":[],"links":[]}'
+        self.assertEqual(self.upload("operit", chats, name="arbitrary-chat-name.json"), chats)
+        self.assertEqual(self.upload_filenames[-1], "arbitrary-chat-name.json")
+        paired = self.upload("operit", [
+            dict(name="合成聊天.json", mimeType="application/json", buffer=chats),
+            dict(name="合成记忆.json", mimeType="application/json", buffer=memories),
+        ])
+        self.assertEqual(self.upload_filenames[-1], "operit.zip")
+        with ZipFile(BytesIO(paired)) as archive:
+            self.assertEqual([archive.read(name) for name in archive.namelist()], [chats, memories])
+        entries = [("folder/chats.JSON", chats), ("library.json", memories)]
+        uploaded = self.upload("operit", archive_bytes(entries + [
+            ("files/photo.png", b"synthetic attachment"), ("__MACOSX/._library.json", b"metadata"),
+        ]))
+        with ZipFile(BytesIO(uploaded)) as archive:
+            self.assertEqual({name: archive.read(name) for name in archive.namelist()}, dict(entries))
 
     def test_fallback_sends_original_zip(self):
         self.page.goto(ORIGIN)

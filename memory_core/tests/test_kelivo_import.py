@@ -70,15 +70,16 @@ CREATE TABLE assistant_memory_rows (
 def _add_memories(db, stamp, *, revised):
     db.executescript(MEMORY_SCHEMA)
     entries = [
-        ("mem_global", "global", None, "instruction", "active", "合成全局记忆。" + "合成续文。" * 36),
-        ("mem_global_other", "global", None, "identity", "active", "合成另一位助手的全局记忆。"),
-        ("mem_assistant", "assistant", "synthetic-a", "workflow", "active",
+        ("mem_global", "global", None, "instruction", "active", "tool", "合成全局记忆。" + "合成续文。" * 36),
+        ("mem_global_other", "global", None, "identity", "active", "manual", "合成另一位助手的全局记忆。"),
+        ("mem_assistant", "assistant", "synthetic-a", "workflow", "active", "extracted",
          "合成陶艺记忆已编辑。" if revised else "合成陶艺记忆。"),
-        ("mem_archived", "assistant", "synthetic-a", "voice", "archived", "合成归档条目。"),
+        ("mem_archived", "assistant", "synthetic-a", "voice", "archived", "distilled", "合成归档条目。"),
     ]
     db.executemany("INSERT INTO memory_entry_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
-        (key, order, scope, assistant, kind, status, content, content, stamp, stamp, "{}", stamp)
-        for order, (key, scope, assistant, kind, status, content) in enumerate(entries)
+        (key, order, scope, assistant, kind, status, content, content, stamp, stamp,
+         json.dumps(dict(source=source)), stamp)
+        for order, (key, scope, assistant, kind, status, source, content) in enumerate(entries)
     ))
     old_id = 27 if revised else 4
     db.execute("INSERT INTO assistant_memory_rows VALUES (?, 0, ?, ?, ?)", (
@@ -218,6 +219,7 @@ class KelivoImportTests(unittest.TestCase):
         self.assertFalse(any(entry["selected"] for entries in groups.values() for entry in entries))
         self.assertEqual(groups["陶艺助手"][0]["source_date"], "2025-03-14")
         self.assertIsNone(groups["写作助手"][0]["source_date"])
+        self.assertEqual([entry["source_date"] for entry in groups["全局记忆"]], ["2025-03-14", None])
         chosen = [groups[name][0]["key"] for name in ("陶艺助手", "全局记忆")]
         filtered = preview(items, daily_limit=12, selected_conversations=[], selected_memories=chosen,
                            date_end="2025-03-13")
@@ -240,6 +242,16 @@ class KelivoImportTests(unittest.TestCase):
         plan = preview(items, daily_limit=12)
         self.assertIsNone(plan["first_date"])
         self.assertEqual(plan["memory_groups"][0]["name"], "旧版助手")
+
+    def test_settings_memory_entries_use_dates_only_for_tool_and_extracted_sources(self):
+        stamp = int(datetime.fromisoformat("2025-03-14T00:01:00+08:00").timestamp()) * 1_000_000
+        entries = [dict(id=source, scope="global", source=source, content=source, createdAt=stamp)
+                   for source in ("tool", "extracted", "manual", "distilled")]
+        backup = packed([("settings.json", json.dumps(dict(memory_entries_v1=json.dumps(entries))))])
+        items = parse_upload("kelivo", backup, SETTINGS)
+        self.assertEqual({entry.title: entry.business_date for entry in items}, {
+            "tool": "2025-03-14", "extracted": "2025-03-14", "manual": None, "distilled": None,
+        })
 
     def test_legacy_backup_requests_upgrade(self):
         uploads = packed([("chats.json", "{}"), ("settings.json", "{}")])

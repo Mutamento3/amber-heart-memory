@@ -12,6 +12,8 @@ const wanted = {
   deepseek: name => name === "manifest.json" || name === "chat_session_index.json"
     || /^chat_sessions\/[^/]+\.json$/.test(name),
   kelivo: name => name === "database/kelivo.db" || name === "settings.json",
+  operit: (name, basename) => /\.json$/i.test(basename) && !basename.startsWith("._")
+    && !name.split("/").includes("__MACOSX"),
 };
 const u16 = (view, offset) => view.getUint16(offset, true);
 const u32 = (view, offset) => view.getUint32(offset, true);
@@ -167,6 +169,47 @@ function pack(entries) {
   end.setUint32(12, size, true);
   end.setUint32(16, offset, true);
   return new Blob([...local, ...central, end.buffer], {type: "application/zip"});
+}
+
+const crcTable = Uint32Array.from({length: 256}, (_, byte) => {
+  for (let bit = 0; bit < 8; bit++) byte = (byte >>> 1) ^ (byte & 1 ? 0xedb88320 : 0);
+  return byte;
+});
+
+async function crc32(file) {
+  let crc = UINT32_MAX;
+  const reader = file.stream().getReader();
+  try {
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) return (crc ^ UINT32_MAX) >>> 0;
+      for (const byte of value) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 0xff];
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function packOperitFiles(files) {
+  const entries = [];
+  const encoder = new TextEncoder();
+  for (const [index, file] of files.entries()) {
+    // Internal ASCII names avoid encoding issues and duplicate device filenames.
+    const name = encoder.encode("operit-" + (index + 1) + ".json");
+    const header = new Uint8Array(46 + name.length);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, CENTRAL_HEADER, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(14, 33, true);
+    view.setUint32(16, await crc32(file), true);
+    view.setUint32(20, file.size, true);
+    view.setUint32(24, file.size, true);
+    view.setUint16(28, name.length, true);
+    header.set(name, 46);
+    entries.push({header, data: file, flags: 0});
+  }
+  return new File([pack(entries)], "operit.zip", {type: "application/zip"});
 }
 
 export async function prepareImportUpload(source, file) {

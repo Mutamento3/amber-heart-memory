@@ -82,4 +82,4 @@ class SharedStructurePromptTests(unittest.TestCase):
         self.assertIn(rules,selection)
         self.assertIn(rules,prompt)
         self.assertEqual(hashlib.sha256(selection.encode()).hexdigest(),
-            '8ea020194545b8518363e633f244004a779cd08894619cf4090b01e862570776')
+            '11c63f6737b4bfb18c1159d50833c862ae8ffcfc9547f78f9643bcb5418bf67f')

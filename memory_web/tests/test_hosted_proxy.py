@@ -423,6 +423,29 @@ class HostedProxyTests(DatabaseTestCase):
                 3,
             )
 
+    def test_tool_round_restores_reasoning_the_client_dropped(self):
+        # DeepSeek thinking mode needs each tool-call message's reasoning back;
+        # some clients drop it, so the proxy restores it from memory only.
+        self.cards()
+        self.fake.round_reasoning = "工具前思考"
+        messages = [{"role": "user", "content": "查一下记忆"}]
+        first = self.chat(model="synthetic-round", messages=messages)
+        dropped = dict(first.json()["choices"][0]["message"])
+        self.assertEqual(dropped.pop("reasoning_content"), "工具前思考0")
+        messages += [dropped, {"role": "tool", "tool_call_id": "call-0", "content": "第一结果"}]
+        second = self.chat(model="synthetic-round", messages=messages)
+        self.assertEqual(second.status_code, 200, second.text)
+        replay = self.fake.requests[-1]["body"]["messages"]
+        self.assertEqual([m.get("reasoning_content") for m in replay if m.get("tool_calls")], ["工具前思考0"])
+        kept = dict(second.json()["choices"][0]["message"], reasoning_content="客户端自己带的")
+        messages += [kept, {"role": "tool", "tool_call_id": "call-1", "content": "第二结果"}]
+        third = self.chat(model="synthetic-round", messages=messages, stream=True)
+        self.assertEqual(third.status_code, 200, third.text)
+        replay = self.fake.requests[-1]["body"]["messages"]
+        self.assertEqual([m.get("reasoning_content") for m in replay if m.get("tool_calls")], ["工具前思考0", "客户端自己带的"])
+        with connect(self.app) as c:
+            self.assertNotIn("工具前思考", str(c.execute("SELECT * FROM memory_core.conversation_requests").fetchall()))
+
     def test_explicit_unused_and_unreported_remain_distinct_in_both_protocols(self):
         mid = self.cards()[0]
         for stream in (False, True):
@@ -503,12 +526,18 @@ class HostedProxyTests(DatabaseTestCase):
                 0,
             )
 
-    def test_kelivo_title_request_passes_through_without_storing(self):
-        messages = [{"role": "user", "content": "I will give you some dialogue content in the <dialogue> block. 合成对话"}]
-        self.fake.reply = "合成标题"
-        response = self.chat(messages=messages)
-        self.assertEqual(response.json()["choices"][0]["message"]["content"], "合成标题")
-        self.assertEqual(self.fake.requests[-1]["body"]["messages"], messages)
+    def test_kelivo_and_operit_title_requests_pass_through_without_storing(self):
+        for messages in (
+            [{"role": "user", "content": "I will give you some dialogue content in the <dialogue> block. 合成对话"}],
+            [{"role": "system", "content": "你负责生成简短的对话标题。\n根据用户第一条消息总结。"},
+             {"role": "user", "content": "用户第一条消息：\n合成对话"}],
+            [{"role": "system", "content": "You generate short conversation titles.\nSummarize."},
+             {"role": "user", "content": [{"type": "text", "text": "First user message: 合成"}]}],
+        ):
+            self.fake.reply = "合成标题"
+            response = self.chat(messages=messages)
+            self.assertEqual(response.json()["choices"][0]["message"]["content"], "合成标题")
+            self.assertEqual(self.fake.requests[-1]["body"]["messages"], messages)
         self.assertEqual(self.models.calls, [])
         with connect(self.app) as c:
             self.assertEqual(c.execute("SELECT count(*) AS n FROM memory_core.conversation_turns").fetchone()["n"], 0)

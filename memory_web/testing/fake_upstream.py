@@ -14,6 +14,7 @@ class FakeUpstream:
         self.stream_parts = None
         self.stream_finish = 'stop'
         self.tool_batches = None
+        self.round_reasoning = None
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -56,6 +57,8 @@ class FakeUpstream:
                     if stage < len(batches):
                         round_message['tool_calls'] = batches[stage]
                         round_finish = 'tool_calls'
+                        if owner.round_reasoning is not None:
+                            round_message['reasoning_content'] = owner.round_reasoning + str(stage)
                 if not body.get('stream'):
                     self.json({'id': 'synthetic-response', 'object': 'chat.completion',
                         'choices': [{'index': 0, 'message': round_message or {'role': 'assistant',

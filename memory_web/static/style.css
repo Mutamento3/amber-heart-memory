@@ -82,9 +82,6 @@ footer { color: var(--muted); font-size: 10px; padding: 20px 0 calc(24px + var(-
   .autosave-status .fade-saved { animation-duration: 0s; }
 }
 .hint { padding: 12px 14px; background: var(--rose); border-radius: 8px; font-size: 13px; white-space: pre-wrap; }
-.key-tips { margin-top: 14px; white-space: normal; }
-.key-tips ul { margin: 6px 0 0; padding-left: 18px; }
-.key-tips li + li { margin-top: 4px; }
 #persona-active { margin: 8px 0; white-space: normal; }
 .configuration-warning { padding: 16px; border: 1px solid var(--pink); border-left: 4px solid var(--pink); border-radius: 8px; background: var(--rose); color: var(--ink); margin-bottom: 16px; }
 .configuration-warning h3 { font-size: 15px; }
@@ -656,3 +653,17 @@ dialog p { margin-top: 12px; }
 .guide-entry-arrow { font-size: 22px; color: var(--muted); }
 .popup:focus-visible { outline: none; }
 .popup h2 + .guide-fact { margin-top: 18px; }
+.connect-entry { margin-top: 14px; }
+.connect-guide { max-width: 560px; }
+.connect-tabs { display: flex; gap: 6px; margin: 4px 0 12px; }
+.connect-tabs button { flex: 1; border-radius: 999px; }
+.connect-tabs button[aria-selected="true"] { background: var(--pink); border-color: var(--pink); color: var(--card); }
+.connect-body h3 { margin: 18px 0 6px; font-size: 15px; font-weight: 500; }
+.connect-body ol, .connect-body ul { margin: 0; padding-left: 20px; line-height: 1.75; }
+.connect-body li + li { margin-top: 6px; }
+.connect-body .meta { margin: 6px 0 0; }
+.copy-value { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; vertical-align: middle; }
+.copy-value code { padding: 1px 6px; border-radius: 4px; background: var(--rose); font-size: 12px; overflow-wrap: anywhere; }
+.copy-value button { min-height: 26px; padding: 0 6px; color: var(--pink); }
+.copy-missing { color: var(--error); font-size: 13px; }
+.app-icon { width: 18px; height: 18px; vertical-align: -4px; color: var(--ink); }

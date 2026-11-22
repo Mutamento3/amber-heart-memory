@@ -333,7 +333,7 @@ If you are an AI assistant installing this on a user's behalf:
 - Every step has a "to confirm" check. When something fails, look at `docker compose logs app` first; the most common causes are a wrong key, a wrong model name, or the domain not resolving to this machine.
 - The script can be run repeatedly: when a `.env` already exists, it doesn't overwrite the configuration; it only rebuilds and upgrades.
 - **Do not fill in the persona for the user.** Once the persona has content, it replaces the system prompt, character cards and lorebooks in the user's chat app; left empty, the app's own are used. Let the user decide whether to fill it in.
-- After installing, pass on to the user the notes under "Settings → Access key → In your chat app, also set" (设置 → 访问钥匙 → 在聊天应用里还要设置) in the admin web app: turn off the app's auto summary, set the context message count to about 4, and don't choose this service for small features such as titles and translation; also remind the user that a persona replaces the app's character cards and lorebooks.
+- After installing, tell the user that "Settings → Access keys" (设置 → 访问钥匙) in the admin web app has a connection guide (接入指南) with step-by-step setup for Kelivo and Operit; in particular, remind them to turn off the app's own memory and conversation summaries, and that a persona replaces the app's character cards and lorebooks.
 - The admin web app's endpoints (such as `/api/spaces/{space}/access-key`) can only be called after the user logs in to the web app, not with the access key; have the user generate and copy the key on the web page.
 
 ### Already running nginx or another reverse proxy
@@ -407,26 +407,10 @@ Importing calls models to extract cards, which costs money. The preview page sho
 
 ## Connecting a chat app
 
-Different apps name their menus differently, but the steps are the same. Below are the generic names, with other common names in parentheses.
+The admin web app has connection guides under "Settings → Access keys" (设置 → 访问钥匙), with your address and key already filled in for copying. The same guides as documents:
 
-1. **Add a new service**: in the app's settings, find "Providers" (service providers, model services, API settings) and add one.
-2. **Choose the OpenAI-compatible type**: it may be called "OpenAI", "OpenAI Compatible" or "Custom OpenAI". Don't choose Claude, Gemini or other types.
-3. **Fill in two fields**:
-   - **API address** (Base URL, API address, API Host): `https://memory.yourdomain/v1`. If there is an "API path" field, keep the default `/chat/completions`; if there is a "Responses API" switch, turn it off.
-   - **API Key**: the key generated under "Settings → Access keys" (设置 → 访问钥匙) in the admin web app.
-4. **Fetch models**: click "Fetch models" (fetch model list, refresh). The list shows the models on your model provider; choose one as the main chat model.
-5. **Conversation settings**:
-   - **System prompt**: if a persona is set in the memory server, it replaces this, and the app's character cards and lorebooks stop taking effect too. To use the app's own, leave the memory server's persona empty.
-   - **Context message count** (number of context messages, history messages): keeping about the last 4 is enough. The memory server assembles the context itself each turn; however long the history shown in the app gets, it's only display, and a smaller count also saves data.
-   - **Auto summary** (context compression, auto summarization): turn it off. The memory server makes its own summaries; if it's on, the app may trigger it often based on token usage and compress the conversation into a third-person outline of "user" and "AI assistant", which looks as if the character is gone.
-6. **Move helper features elsewhere**: for helper features such as generating titles, translation and generating search queries, if the app lets you choose a separate model for them, don't choose the memory server service; turn them off or connect them directly to the model provider instead, otherwise they will also be recorded in the conversation as chat.
-
-### Can't connect?
-
-- **401 or unauthorized**: the access key was copied incompletely, or has been revoked. Go back to the admin web app and copy it again.
-- **404**: the API address is wrong. Some apps append `/v1` to the address themselves; in that case enter just `https://memory.yourdomain`.
-- **Models won't load, keeps spinning**: first open `https://memory.yourdomain` in a browser and see whether the login page appears. If it won't open, the service or certificate has a problem; see the checks in [Installation](#installation).
-- **Chatting works, but the admin web app's "Recall" (召回) page has no records**: the conversation is most likely not using the memory server service; check which service the model selected in the conversation belongs to.
+- [Kelivo](docs/connect/kelivo.en.md)
+- [Operit](docs/connect/operit.en.md)
 
 ### Usage notes
 

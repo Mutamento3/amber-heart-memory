@@ -21,6 +21,7 @@ from memory_core.conversations.conversations import ConversationStore, Conversat
 from ..admin.access_keys import InvalidAccessKey, KeyConfigurationError
 from .upstream_errors import error_message, response_error
 from .hosted_context import HostedContext
+from .reasoning_cache import ReasoningCache
 from .usage_receipt import StreamReceipt, clean_response
 from ..jobs.summary_jobs import SummaryJobs
 from ..jobs.image_jobs import ImageJobs
@@ -33,18 +34,28 @@ MAX_PENDING_EVENTS = 4096
 BOUNDARY = re.compile(br'\r\n\r\n|\n\n|\r\r')
 
 
-# Kelivo's automatic title request; the self-hosted gateway never stores it as chat.
+# Automatic title requests of the recommended apps; never stored as chat.
+# Kelivo puts its fixed English prompt in the user message; Operit sends a
+# fixed system prompt (Chinese or English UI) before the first user message.
 CLIENT_TITLE_PREFIXES = ('I will give you some dialogue content',)
+CLIENT_TITLE_SYSTEM_PREFIXES = ('你负责生成简短的对话标题。', 'You generate short conversation titles.')
+
+
+def message_text(message):
+    content = message.get('content')
+    if isinstance(content, list):
+        content = ''.join(p.get('text') or '' for p in content if isinstance(p, dict) and p.get('type') == 'text')
+    return content.strip() if isinstance(content, str) else ''
 
 
 def client_title_request(messages):
     last = messages[-1]
     if last.get('role') != 'user':
         return False
-    content = last.get('content')
-    if isinstance(content, list):
-        content = ''.join(p.get('text') or '' for p in content if p.get('type') == 'text')
-    return isinstance(content, str) and content.strip().startswith(CLIENT_TITLE_PREFIXES)
+    if message_text(last).startswith(CLIENT_TITLE_PREFIXES):
+        return True
+    first = messages[0]
+    return first.get('role') == 'system' and message_text(first).startswith(CLIENT_TITLE_SYSTEM_PREFIXES)
 
 
 def error_response(status, code, message, **details):
@@ -93,6 +104,7 @@ class Accumulator:
     """Parse archive data independently; reasoning is forwarded but never saved."""
     def __init__(self):
         self.text = []
+        self.reasoning = []  # memory only, for tool continuations; never archived
         self.tools = {}
         self.finish_reason = None
         self.usage = None
@@ -125,6 +137,9 @@ class Accumulator:
             content = delta.get('content')
             if isinstance(content, str):
                 self.text.append(content)
+            reasoning = delta.get('reasoning_content')
+            if isinstance(reasoning, str):
+                self.reasoning.append(reasoning)
             for index, call in enumerate(delta.get('tool_calls') or []):
                 position = call.get('index', index)
                 if not isinstance(position, int) or not 0 <= position < 128:
@@ -202,6 +217,7 @@ class StreamArchive:
         except (psycopg.Error, ValueError, OSError) as exc:
             await self.service.archive_failed(self.store, self.record, exc)
         finally:
+            self.service.keep_reasoning(self.store, self.record, data)
             await self.lease.close()
 
 
@@ -283,6 +299,7 @@ class ProxyService:
         self.stopping = asyncio.Event()
         self.reaper = None
         self.context = HostedContext(settings, models)
+        self.reasoning = ReasoningCache()
         self.summaries = SummaryJobs(settings, summary_models)
         self.images = ImageJobs(settings,image_models,on_saved=self.summaries.schedule)
 
@@ -291,6 +308,10 @@ class ProxyService:
         if saved:
             self.summaries.schedule(store.space_id, record["turn_id"])
         return saved
+
+    def keep_reasoning(self, store, record, data):
+        if data.tools and not data.failed:
+            self.reasoning.remember(store.space_id, record['turn_id'], record['step_index'], ''.join(data.reasoning))
 
     @staticmethod
     def log_archive_error(record, exc):
@@ -481,6 +502,8 @@ class ProxyService:
                 store = await run_in_threadpool(ConversationStore, self.settings.dsn, space, lease_seconds=self.settings.turn_timeout_seconds)
                 record = await run_in_threadpool(store.begin, body, intent)
                 body = record.pop('upstream_body')
+                if record['step_index'] > 0:
+                    self.reasoning.fill(space, record['turn_id'], record['step_index'], body['messages'])
             except ConversationConflict as exc:
                 return error_response(409, exc.code, str(exc), **(exc.record or {}))
             except ValueError as exc:
@@ -558,6 +581,7 @@ class ProxyService:
                     await self.failed(store, record, 'invalid_upstream_response')
                     return error_response(502, 'upstream_error', error_message(value, self.settings.upstream_api_key, '上游回复无效'))
                 if store:
+                    self.keep_reasoning(store, record, data)
                     try:
                         await self.save_archive(
                             store,

@@ -822,10 +822,12 @@ async function onboardingCard(main, epoch) {
     return;
   }
   const go = (section, text) => `<a href="#" data-go="settings" data-section="${section}">${text}</a>`;
-  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">填好接口地址和钥匙后发一条消息，就算完成。</span>` + go("set-key", "查看接口地址")}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")} · <a href="#" class="open-guide">了解记忆怎么用</a></p></section>`);
+  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">照接入指南设置好，发一条消息就算完成。</span><a href="#" class="open-connect">看接入指南</a>`}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")} · <a href="#" class="open-guide">了解记忆怎么用</a></p></section>`);
   const card = $(".onboarding", main);
   wireGo(card);
   $(".open-guide", card).onclick = (event) => { event.preventDefault(); openGuide(); };
+  const connect = $(".open-connect", card);
+  if (connect) connect.onclick = (event) => { event.preventDefault(); openConnectGuide(); };
   $("#dismiss-onboarding", card).onclick = () => {
     remember();
     card.remove();
@@ -889,6 +891,122 @@ function openGuide() {
     if (Math.abs(moved) > 50) go(moved < 0 ? 1 : -1);
   });
   render();
+  dialog.showModal();
+}
+// Step-by-step connection guide for the two recommended chat apps, with this
+// installation's own address and key filled in. Icons are drawn to match the apps.
+const APP_ICON = {
+  tune: '<svg class="app-icon" viewBox="0 0 24 24" aria-label="调节图标"><path fill="currentColor" d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>',
+  menu: '<svg class="app-icon" viewBox="0 0 24 24" aria-label="菜单图标"><path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>',
+  toolbox: '<svg class="app-icon" viewBox="0 0 24 24" aria-label="工具箱图标" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12v4M8 12v4M2 14h20"/><path d="M16 6a2 2 0 0 1 1.4.6l4 4A2 2 0 0 1 22 12v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 .6-1.4l4-4A2 2 0 0 1 8 6z"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>',
+};
+function connectSteps(app, v) {
+  const keyNote = "填琥珀之心的访问钥匙。你在 DeepSeek、Gemini 这些模型申请的 API Key，安装琥珀之心时已经填过了，不要再填到聊天应用里。";
+  if (app === "kelivo") return [
+    ["一、添加供应商", [
+      "打开 设置 → 供应商，点右上角添加供应商，类型选 OpenAI",
+      "名称：琥珀之心（也可以自己起）",
+      `API Key：${v.key}<br>${keyNote}`,
+      `API 地址：${v.proxy}<br>API 路径保持默认的 /chat/completions，Response API 保持关闭。`,
+      "保存后获取模型列表，把要用的聊天模型添加进来",
+    ]],
+    ["二、新建助手", [
+      "新建一个助手，进入助手页",
+      "基础设置：上下文消息数量设为 4（不要关闭，关闭就是无限制，聊久了请求会越来越大，可能报错）",
+      "提示词：琥珀之心填了人设的话，这里的系统提示词不会生效，可以留空；“追加当前时间”不用开，琥珀之心每轮会自己带上当前时间",
+      "记忆：“使用长期记忆”和“允许回忆过去对话”都关掉。关掉以后，Kelivo 自己的记忆和对话摘要都不会运行，设置里的“记忆”和默认模型里的“摘要模型”就不用管了。",
+      "聊天时点顶部标题下面的模型名，选琥珀之心下面的模型",
+    ], "其他设置保持默认就行。"],
+    ["三、接上 MCP（让 TA 能自己查记忆、记书签）", [
+      "打开 设置 → MCP，点右上角的 +",
+      "是否启用：打开；名称：琥珀之心；传输类型：HTTP",
+      `服务器地址：${v.mcp}`,
+      `自定义请求头：点“添加请求头”<br>请求头名称：${v.copy("Authorization")}<br>请求头值：${v.bearer}`,
+      "点保存，Kelivo 会自动连接",
+      `回到聊天界面，点输入框下面左数第四个图标 ${APP_ICON.toolbox}，在“工具”里打开琥珀之心`,
+    ]],
+    ["四、小功能（设置 → 默认模型）", [
+      "聊天建议模型：保持未启用。开了的话，生成建议的请求会被当成聊天记进记忆。",
+      "翻译模型：不要选琥珀之心下面的模型。没单独设置的话，翻译会用当前聊天的模型，也就是走琥珀之心，翻译的内容会被当成聊天记下来。",
+    ]],
+  ];
+  return [
+    ["一、配置模型", [
+      "打开 设置 → 模型与参数配置（第一次打开 Operit 时，首屏点“配置其他模型”也会进到这里），保持“默认配置”",
+      "API提供商：选“OpenAI通用”（在“通用兼容”分组里）",
+      `API端点：${v.proxy}`,
+      `API密钥：${v.key}<br>${keyNote}`,
+      "模型名称：点右边的列表图标获取模型列表，选要用的聊天模型",
+      "模型支持识图：你选的模型能看图就打开；模型支持ToolCall：保持打开",
+      "往下翻到“总结设置”，关掉“启用对话总结”。上下文设置保持默认，对话总结关了它就不会再压缩上下文。",
+    ], "其他设置保持默认就行。"],
+    ["二、关掉 Operit 自带的记忆", [
+      `回到聊天界面，点输入框下面、加号左边的 ${APP_ICON.tune}，展开“记忆”，关掉“自动保存记忆”。开着的话，Operit 每聊一轮都会再调一次模型整理它自己的记忆，这些请求会被当成聊天记进琥珀之心。`,
+      "同一个面板里展开“工具”，点“工具管理”，关掉 query_memory 和 get_memory_by_title。这两个是 Operit 自带记忆的工具，关掉后 TA 想查记忆就会用琥珀之心。",
+    ]],
+    ["三、接上 MCP（让 TA 能自己查记忆、记书签）", [
+      `点左上角的 ${APP_ICON.menu} → 包管理，顶部切到 MCP，点右下角的 +`,
+      "在弹窗里左滑，选“远程”",
+      `主机地址：${v.mcp}`,
+      "连接类型：保持 httpStream",
+      `Bearer Token：${v.key}<br>只填钥匙本身，不用写 Bearer，Operit 会自己加。`,
+      `插件名称：${v.copy("amber_heart")}`,
+      "点连接。之后 TA 需要时会自己激活琥珀之心，聊天界面里不用另外打开。",
+      "打开 设置 → 工具权限设置，点“允许”右边的 +，勾上“琥珀之心:memory”和“琥珀之心:mark_moment”，点完成。这样 TA 查记忆、记书签不用每次等你批准。",
+    ]],
+    ["四、小功能", [
+      "Operit 的翻译默认用“默认配置”，也就是走琥珀之心，翻译的内容会被当成聊天记下来。要用翻译的话，在 设置 → 功能模型配置 里给翻译换一个配置。",
+    ]],
+  ];
+}
+function connectNotes(app) {
+  const name = app === "kelivo" ? "Kelivo" : "Operit";
+  const own = app === "kelivo" ? "Kelivo 自带的记忆、对话摘要" : "Operit 自带的记忆、对话总结";
+  const prompts = app === "kelivo" ? "系统提示词、角色卡和世界书" : "系统提示词和角色卡";
+  return `<h3>注意</h3><ul>
+<li>${name} 里只填琥珀之心的访问钥匙。模型的 API Key 只在安装琥珀之心时填，不要直接填进 ${name}，否则聊天会绕过琥珀之心，既记不下来，也召回不了记忆。</li>
+<li>${own}都要关掉，记忆交给琥珀之心。</li>
+<li>琥珀之心填了人设，会替换 ${name} 里的${prompts}。</li></ul>
+<h3>连不上怎么办</h3><ul>
+<li>提示 401：访问钥匙没复制全，或者已经作废，回这里重新复制。</li>
+<li>提示 404：接口地址填错了，照上面复制的地址重新填。</li>
+<li>拉不到模型：先用浏览器打开琥珀之心的地址，看能不能出现登录页。</li>
+<li>能聊天，但“召回”页没有记录：这个对话用的多半不是琥珀之心下面的模型。</li></ul>`;
+}
+async function openConnectGuide() {
+  if ($("#connect-dialog")) return;
+  let key = "";
+  try { key = (await api(url("/access-key"))).key || ""; } catch { /* shown as missing below */ }
+  const values = [];
+  const copy = (text, shown = text) => {
+    values.push(text);
+    return `<span class="copy-value"><code>${esc(shown)}</code><button type="button" class="quiet" data-copy="${values.length - 1}">复制</button></span>`;
+  };
+  const proxy = (state.mcpUrl || "").replace(/\/mcp\/?$/, "/v1");
+  const masked = key ? "••••" + key.slice(-4) : "";
+  const missing = '<span class="copy-missing">还没有钥匙，先在“设置 → 访问钥匙”里生成</span>';
+  const v = { copy };
+  const [dialog, close] = popupDialog("connect-dialog", () => {});
+  dialog.classList.add("connect-guide");
+  const render = (app) => {
+    values.length = 0;
+    v.proxy = copy(proxy);
+    v.mcp = copy(state.mcpUrl || "");
+    v.key = key ? copy(key, masked) : missing;
+    v.bearer = key ? copy("Bearer " + key, "Bearer " + masked) : missing;
+    const sections = connectSteps(app, v).map(([title, steps, after]) => `<h3>${title}</h3><ol>${steps.map((step) => `<li>${step}</li>`).join("")}</ol>${after ? `<p class="meta">${after}</p>` : ""}`).join("");
+    dialog.innerHTML = `<div class="popup-top"><span class="eyebrow">接入指南</span><button type="button" class="quiet popup-skip">关闭</button></div><h2>接入聊天应用</h2><div class="connect-tabs" role="tablist">${["kelivo", "operit"].map((name) => `<button type="button" role="tab" data-app="${name}" aria-selected="${name === app}">${name === "kelivo" ? "Kelivo" : "Operit"}</button>`).join("")}</div><div class="connect-body">${sections}${connectNotes(app)}</div>`;
+    $(".popup-skip", dialog).onclick = close;
+    $$("[data-app]", dialog).forEach((tab) => (tab.onclick = () => render(tab.dataset.app)));
+    $$("[data-copy]", dialog).forEach((button) => (button.onclick = async () => {
+      // A toast would sit behind the modal card, so the button itself answers.
+      let ok = true;
+      try { await navigator.clipboard.writeText(values[Number(button.dataset.copy)]); } catch { ok = false; }
+      button.textContent = ok ? "已复制" : "复制失败";
+      setTimeout(() => { if (button.isConnected) button.textContent = "复制"; }, 1500);
+    }));
+  };
+  render("kelivo");
   dialog.showModal();
 }
 // Release notes are the maintainer's own Markdown; only bullets, bold and code are rendered.
@@ -1601,7 +1719,7 @@ async function settingsPage(main, initialize, epoch, section, read) {
   const spaceSection = state.spaces.length > 1
     ? `<section class="settings-section space-settings"><h2>记忆空间</h2><p class="muted">每个空间有各自的参与者、主题和记忆。</p><label>当前空间<select id="space" aria-label="记忆空间">${state.spaces.map((space) => `<option value="${esc(space.id)}" ${space.id === state.space ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label></section>`
     : "";
-  main.innerHTML = `${spaceSection}<div class="settings-index" role="group" aria-label="设置分区"><button type="button" data-jump="set-together">相识日</button><button type="button" data-jump="set-people">参与者</button><button type="button" data-jump="set-key">访问钥匙</button><button type="button" data-jump="set-mcp">MCP 连接</button><button type="button" data-jump="set-persona">人设</button><button type="button" data-jump="set-import">导入</button><button type="button" data-jump="set-review">自动入库</button><button type="button" data-jump="set-bookmarks">记忆书签</button></div><section class="settings-section" id="set-together" aria-labelledby="together-title"><h2 id="together-title">相识日</h2><p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p><form id="together-form" class="together"><div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form></section><section class="settings-section" id="set-people" aria-labelledby="people-title"><h2 id="people-title">参与者</h2><p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}</section><section class="settings-section" id="set-key" aria-labelledby="key-title"><h2 id="key-title">访问钥匙</h2><p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p><div class="mcp-field"><label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label><button type="button" id="copy-proxy">复制</button></div><div id="key-content"><p class="loading">正在读取…</p></div><div class="hint key-tips"><strong>在聊天应用里还要设置</strong><ul><li>关掉应用自己的自动总结、上下文压缩。记忆库会自己做摘要；开着的话，应用可能把对话压成“用户、AI 助手”的提纲，看起来像角色没了。</li><li>上下文条数保留 4 条左右就够了。</li><li>应用里自动起标题、翻译这类小功能，如果能单独选模型，不要选记忆库这个服务，改选模型平台的或者关掉，不然它们也会被当成聊天记进记忆。</li></ul></div></section><section class="settings-section" id="set-mcp" aria-labelledby="mcp-title"><h2 id="mcp-title">MCP 连接</h2><p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p><div id="mcp-content"></div></section><section class="settings-section" id="set-persona" aria-labelledby="persona-title"><h2 id="persona-title">人设（系统提示词）</h2><p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p><form id="persona-form"><div class="persona-import"><button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span><input type="file" id="persona-file" hidden></div><p class="hint" id="persona-active" ${(config.persona || "").trim() ? "" : "hidden"}>现在聊天应用里的系统提示词、角色卡和世界书都不会生效。想用聊天应用自己的，把这里清空就行。</p><label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="注意：这里填了就会替换聊天应用里的系统提示词（包括角色卡、世界书），两边都填的话以这里为准；不填就用聊天应用自己的。">${esc(config.persona || "")}</textarea></label><p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-import" aria-labelledby="import-title"><h2 id="import-title">导入</h2><p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p><button type="button" class="primary" data-go="imports">去导入</button></section><section class="settings-section" id="set-review" aria-labelledby="auto-approval-title"><h2 id="auto-approval-title">自动入库</h2><form id="auto-approval-form"><label class="check" for="auto-approval"><input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label><p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-bookmarks" aria-labelledby="bookmark-settings-title"><h2 id="bookmark-settings-title">记忆书签</h2><form id="period-notes-form"><label class="check" for="period-notes"><input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label><p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form></section><button type="button" class="guide-entry"><span><strong>记忆说明</strong><span class="meta">核心记忆、书签、日记、摘要和卡片有什么区别</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button>${config.version ? `<p class="meta app-version">当前版本 v${esc(config.version)}</p>` : ""}${logoutHTML()}`;
+  main.innerHTML = `${spaceSection}<div class="settings-index" role="group" aria-label="设置分区"><button type="button" data-jump="set-together">相识日</button><button type="button" data-jump="set-people">参与者</button><button type="button" data-jump="set-key">访问钥匙</button><button type="button" data-jump="set-mcp">MCP 连接</button><button type="button" data-jump="set-persona">人设</button><button type="button" data-jump="set-import">导入</button><button type="button" data-jump="set-review">自动入库</button><button type="button" data-jump="set-bookmarks">记忆书签</button></div><section class="settings-section" id="set-together" aria-labelledby="together-title"><h2 id="together-title">相识日</h2><p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p><form id="together-form" class="together"><div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form></section><section class="settings-section" id="set-people" aria-labelledby="people-title"><h2 id="people-title">参与者</h2><p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}</section><section class="settings-section" id="set-key" aria-labelledby="key-title"><h2 id="key-title">访问钥匙</h2><p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p><div class="mcp-field"><label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label><button type="button" id="copy-proxy">复制</button></div><div id="key-content"><p class="loading">正在读取…</p></div><button type="button" class="guide-entry connect-entry"><span><strong>接入指南</strong><span class="meta">Kelivo、Operit 一步步怎么设置</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button></section><section class="settings-section" id="set-mcp" aria-labelledby="mcp-title"><h2 id="mcp-title">MCP 连接</h2><p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p><div id="mcp-content"></div></section><section class="settings-section" id="set-persona" aria-labelledby="persona-title"><h2 id="persona-title">人设（系统提示词）</h2><p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p><form id="persona-form"><div class="persona-import"><button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span><input type="file" id="persona-file" hidden></div><p class="hint" id="persona-active" ${(config.persona || "").trim() ? "" : "hidden"}>现在聊天应用里的系统提示词、角色卡和世界书都不会生效。想用聊天应用自己的，把这里清空就行。</p><label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="注意：这里填了就会替换聊天应用里的系统提示词（包括角色卡、世界书），两边都填的话以这里为准；不填就用聊天应用自己的。">${esc(config.persona || "")}</textarea></label><p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-import" aria-labelledby="import-title"><h2 id="import-title">导入</h2><p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p><button type="button" class="primary" data-go="imports">去导入</button></section><section class="settings-section" id="set-review" aria-labelledby="auto-approval-title"><h2 id="auto-approval-title">自动入库</h2><form id="auto-approval-form"><label class="check" for="auto-approval"><input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label><p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-bookmarks" aria-labelledby="bookmark-settings-title"><h2 id="bookmark-settings-title">记忆书签</h2><form id="period-notes-form"><label class="check" for="period-notes"><input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label><p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form></section><button type="button" class="guide-entry"><span><strong>记忆说明</strong><span class="meta">核心记忆、书签、日记、摘要和卡片有什么区别</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button>${config.version ? `<p class="meta app-version">当前版本 v${esc(config.version)}</p>` : ""}${logoutHTML()}`;
   wireSpaceSelector();
   wireLogout();
   // The four writes use the same space revision, even across different forms.
@@ -1651,7 +1769,8 @@ async function settingsPage(main, initialize, epoch, section, read) {
   window.addEventListener("scroll", onSettingsScroll, { passive: true });
   markCurrentSection();
   wireGo($("#set-import", main));
-  $(".guide-entry", main).onclick = openGuide;
+  $(".guide-entry:not(.connect-entry)", main).onclick = openGuide;
+  $(".connect-entry", main).onclick = openConnectGuide;
   // The chat proxy lives next to /mcp on the same origin.
   const proxyAddress = $("#proxy-address", main);
   proxyAddress.value = (state.mcpUrl || "").replace(/\/mcp\/?$/, "/v1");

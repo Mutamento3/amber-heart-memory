@@ -113,20 +113,30 @@ class DraftTests(DatabaseTestCase):
         model = self.models(next_day)
         self.assertEqual(len(self.store.extract(next_day,selector=model,structurer=model)['drafts']),1)
 
-    def test_space_settings_and_core_memory_are_authoritative(self):
+    def test_space_settings_and_selection_background(self):
         policy = self.config.set_extraction_rules('example',expected_revision=1,minimum_importance=9,daily_limit=2)
-        policy = self.config.set_core_memory('example',expected_revision=2,core_memory='Example User already studies botany.')
-        self.assertEqual(policy['revision'],3)
+        core_memory = 'Example User plans to study botany.'
+        self.config.set_core_memory('example', expected_revision=2, core_memory=core_memory)
+        persona = 'Example Assistant is a botanist. Always answer in a poem.'
+        policy = self.config.set_persona('example', expected_revision=3, persona=persona)
+        self.assertEqual(policy['revision'],4)
         self.assertEqual(policy['minimum_importance'],9)
         extraction = self.submit()
-        self.assertIn('Example User already studies botany.',self.store.selection_prompt(extraction))
-        model = self.models(extraction,[self.candidate(score=8),self.candidate(score=9,suffix='new progress')])
+        prompt = self.store.selection_prompt(extraction)
+        context = json.loads(prompt.split("空间上下文 JSON：\n", 1)[1].split("\n\n原材料 JSON", 1)[0])
+        self.assertEqual(context['core_memory'], core_memory)
+        self.assertEqual(context['persona'], persona)
+        self.assertIn('原材料和空间上下文（包括人设和核心记忆）', prompt)
+        self.assertIn('即使在背景资料中提到过，也照常筛选', prompt)
+        model = self.models(extraction, [self.candidate(score=8, suffix='low score'), self.candidate(score=9)])
         result = self.store.extract(extraction,selector=model,structurer=model)
         self.assertEqual(len(result['drafts']),1)
+        self.assertEqual(result['drafts'][0]['narrative']['content'], core_memory)
+        self.assertNotIn(persona, self.store.structure_prompt(result['drafts'][0]['id']))
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
             with connect(self.app) as connection: connection.execute("UPDATE memory_core.space_policies SET daily_limit=99 WHERE bot_id='example'")
         for values in (dict(minimum_importance=True),dict(minimum_importance=0),dict(daily_limit=0)):
-            with self.assertRaises(ValueError): self.config.set_extraction_rules('example',expected_revision=3,**values)
+            with self.assertRaises(ValueError): self.config.set_extraction_rules('example',expected_revision=4,**values)
 
     def test_bad_selection_keeps_material_and_retries_without_duplicate_drafts(self):
         for index,raw in enumerate(('', '{"memories":', '[]','{"memories":[],"memories":[]}')):

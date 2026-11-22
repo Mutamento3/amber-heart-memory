@@ -30,7 +30,7 @@ _structure_pool = ThreadPoolExecutor(
 )
 
 
-def context_for(connection, space_id):
+def context_for(connection, space_id, *, include_persona=False):
     policy = read_policy(connection, space_id)
     topics=[{key: topic[key] for key in ("id", "name", "is_fallback", "description")}
         for topic in read_topics(connection, space_id, policy=policy)]
@@ -39,12 +39,17 @@ def context_for(connection, space_id):
         # In topic descriptions these role words refer to this space's participants.
         # One pass leaves role-like substrings inside configured names unchanged.
         topic['description']=re.sub(r'用户|(?<![A-Za-z])\s*AI\s*(?![A-Za-z])',lambda match:names[match[0].strip()],topic['description'])
-    return dict(policy_revision=policy['revision'], participants=policy['participants'],
+    context = dict(policy_revision=policy['revision'], participants=policy['participants'],
         ignored_terms=policy['ignored_terms'], core_memory=policy.get('core_memory',''),
         minimum_importance=policy['minimum_importance'], daily_limit=policy['daily_limit'],
         known_entities=connection.execute('SELECT id,name,aliases,entity_type,entity_subtype FROM memory_core.entities WHERE bot_id=%s ORDER BY id', (space_id,)).fetchall(),
         topics=topics,
         entity_types=ENTITY_TYPES, entity_subtypes=ENTITY_SUBTYPES, relation_types=RELATION_TYPES)
+    if include_persona:
+        # Persona is selection background. Keep persisted job digests and the
+        # structure input compatible with existing drafts and imports.
+        context["persona"] = policy.get("persona", "")
+    return context
 
 
 def context_digest(context):
@@ -200,7 +205,7 @@ class DraftStore(GraphStore):
 
     def selection_prompt(self, extraction_id):
         with connect(self.dsn) as connection:
-            context = context_for(connection, self.space_id)
+            context = context_for(connection, self.space_id, include_persona=True)
             extraction = self._extraction(connection, extraction_id)
             source = self._source(connection, extraction['material_id'])
             if source['deleted_at']:

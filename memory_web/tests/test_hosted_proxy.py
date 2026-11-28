@@ -120,6 +120,34 @@ class HostedProxyTests(DatabaseTestCase):
             self.assertNotIn(missing, str(upstream))
         self.assertIn("真实时间线的第一句", str(upstream))
         self.assertIn("本轮文字", upstream["messages"][-1]["content"])
+        self.assertNotIn("cache_control", str(upstream))
+
+    def test_claude_empty_sections_and_client_cache_options(self):
+        messages = [
+            {"role": "system", "content": "合成前端人设"},
+            {"role": "system", "content": ""},
+            {"role": "user", "content": "新的对话"},
+        ]
+        model = "relay/MyClaudeSonnet"
+        response = self.chat(model=model, messages=messages)
+        self.assertEqual(response.status_code, 200, response.text)
+        wire = self.fake.requests[-1]["body"]["messages"]
+        self.assertEqual(wire[0]["content"], [{
+            "type": "text", "text": "合成前端人设",
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+        }])
+        self.assertNotIn("cache_control", str(wire[1:]))
+
+        explicit = {"type": "ephemeral"}
+        response = self.chat("新消息", model=model, messages=messages, cache_control=explicit)
+        self.assertEqual(response.status_code, 200, response.text)
+        wire = self.fake.requests[-1]["body"]
+        self.assertEqual(wire["cache_control"], explicit)
+        self.assertNotIn("cache_control", str(wire["messages"]))
+
+        response = self.chat(model=model, messages=messages, memory={"operation": "non_chat"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.fake.requests[-1]["body"], {"model": model, "messages": messages})
 
     def test_recall_real_pipeline_snapshot_only_injected_numbers_counted_and_match_clean_body(
         self,

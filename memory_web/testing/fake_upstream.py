@@ -14,6 +14,7 @@ class FakeUpstream:
         self.stream_parts = None
         self.stream_finish = 'stop'
         self.tool_batches = None
+        self.tool_models = {'synthetic-round'}
         self.round_reasoning = None
         owner = self
 
@@ -47,7 +48,7 @@ class FakeUpstream:
                     return
                 round_message = None
                 round_finish = 'stop'
-                if model == 'synthetic-round':
+                if model in owner.tool_models:
                     completed = sum(m['role'] == 'tool' for m in body['messages'])
                     round_message = {'role': 'assistant', 'content': owner.reply if owner.reply is not None else '合成步骤' + str(completed)}
                     batches = owner.tool_batches if owner.tool_batches is not None else [

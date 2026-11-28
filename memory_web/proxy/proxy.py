@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from memory_core.conversations.conversations import ConversationStore, ConversationConflict, DuplicateRequest, content_parts
 from ..admin.access_keys import InvalidAccessKey, KeyConfigurationError
+from .claude_cache import mark_claude_cache
 from .upstream_errors import error_message, response_error
 from .hosted_context import HostedContext
 from .reasoning_cache import ReasoningCache
@@ -536,6 +537,8 @@ class ProxyService:
                 except (psycopg.Error, OSError, ValueError) as exc:
                     await self.archive_failed(store, record, exc)
                     return error_response(503, 'history_unavailable', '历史或本轮上下文未能读取、保存，请稍后重试')
+            if record:
+                mark_claude_cache(body, record.get("context_sections"))
             response = await self.exchange(body, store, record, lease)
             if record:
                 response.headers['X-Memory-Turn-ID'] = str(record['turn_id'])

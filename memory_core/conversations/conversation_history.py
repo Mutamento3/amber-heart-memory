@@ -457,6 +457,7 @@ class ConversationHistory:
                     record["turn_id"],
                 ),
             )
+        record["context_sections"] = sections
         return upstream
 
     def _save_receipt(self, c, turn, record, reported, reported_none, timestamp):

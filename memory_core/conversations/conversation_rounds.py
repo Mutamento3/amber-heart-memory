@@ -509,6 +509,7 @@ class ConversationRounds:
         record["lease_token"] = str(row["lease_token"])
         self._claim(c, record, now, timestamp)
         record["upstream_body"] = upstream
+        record["context_sections"] = turn["context_manifest"].get("sections", ())
         return record
 
     def _next_event(self, c, turn_id):

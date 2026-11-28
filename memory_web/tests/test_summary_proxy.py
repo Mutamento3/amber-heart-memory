@@ -8,6 +8,7 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from memory_core.bookmarks.recent_notes import RecentNotesStore
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
 from memory_core.daily.summaries import active_summaries
@@ -250,6 +251,54 @@ class SummaryProxyTests(DatabaseTestCase):
         second = self.chat("", model="synthetic-round", messages=messages)
         self.assertEqual(second.status_code, 200, second.text)
         self.assertEqual(self.fake.requests[-1]["body"]["messages"][:-2], initial)
+
+    def test_claude_cache_breakpoints_replay_across_workers(self):
+        config = SpaceConfiguration(self.owner)
+        config.set_persona("one", expected_revision=1, persona="合成人设")
+        config.set_core_memory("one", expected_revision=2, core_memory="合成核心记忆")
+        RecentNotesStore(self.app, "one").save({"daily": "合成日常书签"}, 0)
+        self.chat("较早的聊天")
+        self.chat("留下的聊天")
+
+        model = "anthropic/claude-sonnet-4.6"
+        self.fake.tool_models.add(model)
+        messages = [{"role": "user", "content": "这轮请查一下"}]
+        first = self.request("", model=model, messages=messages)
+        self.assertEqual(first.status_code, 200, first.text)
+        initial = self.fake.requests[-1]["body"]["messages"]
+        self.assertEqual(initial[0]["content"], "合成人设")
+        expected = {1: "合成核心记忆", 2: "合成日常书签", 3: "合成摘要1", 5: "合成回答"}
+        for i, message in enumerate(initial):
+            if i in expected:
+                block, = message["content"]
+                self.assertEqual(block["cache_control"], {"type": "ephemeral", "ttl": "1h"})
+                self.assertIn(expected[i], block["text"])
+            else:
+                self.assertIsInstance(message["content"], str)
+        self.assertIn("留下的聊天", initial[4]["content"])
+        self.assertIn("当前时间：", initial[-3]["content"])
+        self.assertIn("这轮请查一下", initial[-1]["content"])
+        with connect(self.app) as c:
+            turn = c.execute(
+                "SELECT frozen_context FROM memory_core.conversation_turns ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            self.assertNotIn("cache_control", str(turn["frozen_context"]))
+
+        config.set_persona("one", expected_revision=3, persona="下一轮的新人设")
+        messages += [
+            first.json()["choices"][0]["message"],
+            {"role": "tool", "tool_call_id": "call-0", "content": "合成结果"},
+        ]
+        with TestClient(create_app(self.settings, summary_models=self.summary), base_url=ORIGIN) as worker:
+            second = worker.post(
+                "/v1/chat/completions", headers=self.auth,
+                json=dict(model=model, messages=messages, stream=True),
+            )
+            self.assertEqual(second.status_code, 200, second.text)
+            worker.portal.call(worker.app.state.proxy.drain)
+        replay = self.fake.requests[-1]["body"]["messages"]
+        self.assertEqual(replay[:-2], initial)
+        self.assertEqual(replay[-1]["content"], "合成结果")
 
     def test_length_protection_is_visible_upstream_and_recorded_on_dialogue_page(self):
         self.application.state.proxy.context.summary_settings = type(

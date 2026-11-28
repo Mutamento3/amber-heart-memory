@@ -24,6 +24,7 @@ from ..storage.space import RevisionConflict, read_policy, read_topics
 
 
 MAX_CONCURRENT_STRUCTURES = 6
+IMPORT_RETRY_HTTP_SUFFIXES = ('_http_429', '_http_502', '_http_503', '_http_504')
 
 _structure_pool = ThreadPoolExecutor(
     max_workers=MAX_CONCURRENT_STRUCTURES, thread_name_prefix="memory-structure"
@@ -231,7 +232,7 @@ class DraftStore(GraphStore):
         return render_prompt('structure', context, structure_input(draft['narrative'],draft['business_date'],source['segments'],self.settings))
 
     @staticmethod
-    def _model_call(model, prompt, parse, *, retry_rate_limit=False):
+    def _model_call(model, prompt, parse, *, retry_transient_http=False):
         if model is None:
             raise ValueError('必须显式提供模型岗位；不会回退到真实模型')
         for attempt in range(2):
@@ -244,9 +245,10 @@ class DraftStore(GraphStore):
                     raise
             except ModelCallError as error:
                 if attempt == 1 or not (error.code.endswith('_timeout')
-                    or (retry_rate_limit and error.code.endswith('_http_429'))):
+                    or (retry_transient_http and error.code.endswith(IMPORT_RETRY_HTTP_SUFFIXES))):
                     raise
 
+    # Preserve the caller's opt-in keyword as the set of transient HTTP errors expands.
     def extract(self, extraction_id, *, selector, structurer, clock=None, retry_rate_limit=False,
                 model_timeout=DEFAULT_EXTRACTION_TIMEOUT_SECONDS):
         with connect(self.dsn) as connection:
@@ -263,7 +265,7 @@ class DraftStore(GraphStore):
         if extraction['status'] in ('pending','failed'):
             try:
                 candidates, reason = self._model_call(selector, self.selection_prompt(extraction_id),
-                    lambda raw: selection_result(raw,source['segments']), retry_rate_limit=retry_rate_limit)
+                    lambda raw: selection_result(raw,source['segments']), retry_transient_http=retry_rate_limit)
             except (MaterialExpired, RevisionConflict):
                 raise
             except Exception as exc:
@@ -294,7 +296,7 @@ class DraftStore(GraphStore):
                     updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s''', ('selected' if selected else 'complete',reason,extraction_id,self.space_id))
         futures = [
             _structure_pool.submit(self._structure, draft, structurer, clock=clock,
-                                   retry_rate_limit=retry_rate_limit, model_timeout=model_timeout)
+                                   retry_transient_http=retry_rate_limit, model_timeout=model_timeout)
             for draft in self.extraction(extraction_id)['drafts']
             if draft['status'] in ('structure_pending', 'structure_failed')
         ]
@@ -386,15 +388,15 @@ class DraftStore(GraphStore):
             prompt = self._render_structure_prompt(current, context, source)
         return current, context, source, prompt
 
-    def _structure(self, draft, model, *, clock=None, retry_rate_limit=False,
+    def _structure(self, draft, model, *, clock=None, retry_transient_http=False,
                    model_timeout=DEFAULT_EXTRACTION_TIMEOUT_SECONDS):
-        # The lease covers both attempts, plus the import's shared 429 cooldown.
+        # The lease covers both attempts, plus the import's shared cooldown.
         # Do not change the review version until there is a result to publish.
         token = uuid4()
-        lease_seconds = 2 * model_timeout + (180 if retry_rate_limit else 30)
+        lease_seconds = 2 * model_timeout + (180 if retry_transient_http else 30)
         current, context, source, prompt = self._claim_structure(draft, token, lease_seconds)
         try:
-            result = self._structure_result(current, model, context, source, prompt, retry_rate_limit=retry_rate_limit)
+            result = self._structure_result(current, model, context, source, prompt, retry_transient_http=retry_transient_http)
             self._save_structure(current, token, source, result, clock=clock)
         except Exception:
             # Release our claim promptly on conflicts. If the database is
@@ -405,7 +407,7 @@ class DraftStore(GraphStore):
                     WHERE id=%s AND bot_id=%s AND structure_claim_token=%s''', (current['id'], self.space_id, token))
             raise
 
-    def _structure_result(self, draft, model, context, source, prompt, *, retry_rate_limit):
+    def _structure_result(self, draft, model, context, source, prompt, *, retry_transient_http):
         try:
             def parse(raw):
                 value=json_object(raw)
@@ -421,7 +423,7 @@ class DraftStore(GraphStore):
                     return dict(result,title=title,content=content)
                 return structure(value,context)
             result = self._model_call(model, prompt, parse,
-                retry_rate_limit=retry_rate_limit)
+                retry_transient_http=retry_transient_http)
             return {**draft['narrative'], **result}, 'pending', None
         except (MaterialExpired, RevisionConflict):
             raise

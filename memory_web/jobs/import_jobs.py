@@ -9,7 +9,10 @@ from time import monotonic, sleep
 
 from starlette.concurrency import run_in_threadpool
 
-from memory_core.cards.drafts import MAX_CONCURRENT_STRUCTURES, ExtractionConfigurationChanged, MaterialExpired, StructureInProgress
+from memory_core.cards.drafts import (
+    IMPORT_RETRY_HTTP_SUFFIXES, MAX_CONCURRENT_STRUCTURES, ExtractionConfigurationChanged,
+    MaterialExpired, StructureInProgress,
+)
 from memory_core.models.http_transport import ModelCallError
 from memory_core.imports.imports import IMPORT_APPROVAL_FAILED, ImportStore, import_run_lock
 from memory_core.cards.review import ReviewStore
@@ -48,7 +51,7 @@ class ImportBackoff:
 
     def succeeded(self, generation):
         with self.lock:
-            # A response from before the 429 cannot reset the backoff.
+            # A response from before the cooldown cannot reset the backoff.
             if generation == self.generation:
                 self.delay = 0
 
@@ -147,7 +150,7 @@ class ImportJobs:
                 try:
                     value = stage.stage.extract(prompt)
                 except ModelCallError as error:
-                    if error.code.endswith('_http_429'):
+                    if error.code.endswith(IMPORT_RETRY_HTTP_SUFFIXES):
                         # One material can have several structure calls in
                         # flight while the other workers are still selecting.
                         self.backoff.limited(self.settings.import_concurrency + MAX_CONCURRENT_STRUCTURES - 1)

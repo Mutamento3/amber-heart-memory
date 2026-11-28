@@ -655,18 +655,52 @@ class WebImportTests(DatabaseTestCase):
         response=self.upload()
         endpoint=self.path+'/'+response.json()['id']
         self.post(endpoint+'/confirm')
-        self.responses.failures['structure']=1
+        self.responses.failures['structure']=2
         self.drain()
         failed=self.http.get(endpoint).json()
         self.assertEqual((failed['status'],failed['progress']['failed']),('completed',1))
         self.assertEqual(failed['progress']['structured_cards'],0)
+        self.assertEqual(failed['model_calls'],3)
         self.post(endpoint+'/retry')
         self.application.state.imports=ImportJobs(self.settings)
         self.drain()
         retried=self.http.get(endpoint).json()
         self.assertEqual(retried['status'],'completed')
         self.assertEqual(retried['progress']['structured_cards'],1)
-        self.assertEqual([stage for stage,_ in self.responses.calls],['selection','structure','structure'])
+        self.assertEqual([stage for stage,_ in self.responses.calls],['selection','structure','structure','structure'])
+
+    def test_temporary_http_errors_back_off_and_retry_selection_and_structure(self):
+        for day, (selection_status, structure_status) in enumerate(((429, 502), (503, 504)), start=14):
+            with self.subTest(selection_status=selection_status, structure_status=structure_status):
+                record = claude(key=f'synthetic-{selection_status}', stamp=f'2025-03-{day:02d}T10:00:00Z')
+                record['chat_messages'][0]['text'] = f'合成请求 {selection_status}。'
+                uploaded = self.upload(body=json.dumps([record]).encode())
+                self.assertEqual(uploaded.status_code, 200, uploaded.text)
+                endpoint = self.path + '/' + uploaded.json()['id']
+                self.post(endpoint + '/confirm')
+                self.application.state.imports = ImportJobs(replace(self.settings, import_concurrency=1))
+                remaining = {'selection': selection_status, 'structure': structure_status}
+                calls = []
+                moment = 100
+
+                def respond(path, body):
+                    stage = 'selection' if 'segments' in self.prompt_material(body) else 'structure'
+                    calls.append((stage, moment))
+                    if stage in remaining:
+                        return remaining.pop(stage), {'error': {'code': 'synthetic_temporary_failure'}}
+                    return self.responses.respond(path, body)
+
+                def advance(seconds):
+                    nonlocal moment
+                    moment += seconds
+
+                self.server.hook = respond
+                with patch('memory_web.jobs.import_jobs.monotonic', lambda: moment), patch('memory_web.jobs.import_jobs.sleep', advance):
+                    self.drain()
+                self.assertEqual(calls, [('selection', 100), ('selection', 102), ('structure', 103), ('structure', 105)])
+                result = self.http.get(endpoint).json()
+                self.assertEqual((result['status'], result['progress']['failed'], result['model_calls']), ('completed', 0, 4))
+                self.assertEqual(result['progress']['structured_cards'], 1)
 
     def test_saves_during_selection_and_structure_do_not_pause_import(self):
         config = SpaceConfiguration(self.owner)

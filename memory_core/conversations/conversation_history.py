@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 from . import chat_text as text
 from ..storage.clock import business_day_bounds
-from .conversation_context import freeze_message, thaw_message, timed_content
+from .conversation_context import freeze_message, prepend_text, thaw_message, timed_content
 from .conversation_rounds import ConversationConflict
 from ..storage.db import connect
 from ..storage.space import read_policy
@@ -31,7 +31,35 @@ def parts_text(parts, image_descriptions=None):
     return ''.join(rendered)
 
 
+def _tool_note(tools):
+    if not tools:
+        return ""
+    returned = {event["tool_call_id"]: event for event in tools if event["kind"] == "result"}
+    notes, calls = [], []
+    for event in tools:
+        if event["kind"] != "call":
+            continue
+        card = render_tool_card(event, returned.get(event["tool_call_id"]))
+        if card is None:
+            status = "returned" if event["tool_call_id"] in returned else "pending"
+            calls.append(text.TOOL_ITEM.format(
+                name=event.get("tool_name") or text.UNNAMED_TOOL, status=text.TOOL_STATUSES[status]
+            ))
+        else:
+            if calls:
+                notes.append(text.TOOLS.format(tools=text.TOOL_SEPARATOR.join(calls)))
+                calls = []
+            notes.append(card)
+    if calls:
+        notes.append(text.TOOLS.format(tools=text.TOOL_SEPARATOR.join(calls)))
+    return "\n".join(notes)
+
+
 def render_turn(turn, messages, tools, settings):
+    return _render_turn(turn, messages, settings, _tool_note(tools))
+
+
+def _render_turn(turn, messages, settings, note=""):
     rendered = []
     has_reply = any(
         m["role"] == "assistant" and parts_text(m["content_parts"]).strip()
@@ -49,34 +77,11 @@ def render_turn(turn, messages, tools, settings):
             if message["content_state"] == "incomplete":
                 content += "\n" + text.INCOMPLETE
         rendered.append({"role": message["role"], "content": content})
-    if tools:
-        returned = {
-            t["tool_call_id"]: t
-            for t in tools
-            if t["kind"] == "result"
-        }
-        notes, calls = [], []
-        for event in tools:
-            if event['kind'] != 'call':
-                continue
-            card = render_tool_card(event, returned.get(event['tool_call_id']))
-            if card is None:
-                calls.append(text.TOOL_ITEM.format(
-                    name=event.get('tool_name') or text.UNNAMED_TOOL,
-                    status=text.TOOL_STATUSES['returned' if event['tool_call_id'] in returned else 'pending']))
-            else:
-                if calls:
-                    notes.append(text.TOOLS.format(tools=text.TOOL_SEPARATOR.join(calls)))
-                    calls = []
-                notes.append(card)
-        if calls:
-            notes.append(text.TOOLS.format(tools=text.TOOL_SEPARATOR.join(calls)))
-        note = '\n'.join(notes)
-        if note:
-            if rendered and rendered[-1]["role"] == "assistant":
-                rendered[-1]["content"] += "\n" + note
-            else:
-                rendered.append({"role": "assistant", "content": note})
+    if note:
+        if rendered and rendered[-1]["role"] == "assistant":
+            rendered[-1]["content"] += "\n" + note
+        else:
+            rendered.append({"role": "assistant", "content": note})
     if (
         has_reply
         and turn["generation_state"] in ("incomplete", "failed")
@@ -86,6 +91,26 @@ def render_turn(turn, messages, tools, settings):
         if rendered:
             rendered[-1]["content"] += "\n" + text.INCOMPLETE
     return rendered
+
+
+def _tool_record_prefix(notes):
+    return text.HISTORY_TOOL_RECORD.format(records="\n".join(notes)) if notes else ""
+
+
+def _chat_history(groups):
+    """Move records only in the model's dialogue, after whole-round trimming."""
+    history, pending = [], []
+    has_tool_records = False
+    for group in groups:
+        for message in group.get("chat_messages", group["messages"]):
+            if pending and message["role"] == "user":
+                message = dict(message, content=_tool_record_prefix(pending) + message["content"])
+                pending.clear()
+            history.append(message)
+        if note := group.get("tool_note"):
+            has_tool_records = True
+            pending.append(note)
+    return history, _tool_record_prefix(pending), has_tool_records
 
 
 def memory_context_sections(source, day, settings):
@@ -244,13 +269,13 @@ class ConversationHistory:
         for tool in tools:
             tools_by_turn[tool["turn_id"]].append(tool)
         for old in turns:
-            rendered = render_turn(
-                old,
-                messages_by_turn[old["id"]],
-                tools_by_turn[old["id"]],
-                self.settings,
-            )
-            groups.append(dict(turn_id=old["id"], messages=rendered))
+            old_messages = messages_by_turn[old["id"]]
+            note = _tool_note(tools_by_turn[old["id"]])
+            # Keep the existing input for recall and whole-round history budgeting.
+            group = dict(turn_id=old["id"], messages=_render_turn(old, old_messages, self.settings, note))
+            if note:
+                group.update(tool_note=note, chat_messages=_render_turn(old, old_messages, self.settings))
+            groups.append(group)
         omitted = []
         if max_history_chars is not None:
             from ..daily.summary_policy import protected_tail
@@ -262,6 +287,7 @@ class ConversationHistory:
             policy=policy,
             turn=turn,
             history=history,
+            history_groups=groups,
             carryover_turn_ids=[t["id"] for t in carry],
             history_turn_ids=[g["turn_id"] for g in groups],
             history_message_ids=[m["id"] for m in messages if m["turn_id"] in included],
@@ -315,8 +341,13 @@ class ConversationHistory:
             if content:
                 prefix.append({"role": "system", "content": content})
             sections.append(dict(kind=kind, start=start, end=len(prefix)))
+        history, current_history_prefix, has_tool_records = _chat_history(source["history_groups"])
+        if has_tool_records:
+            start = len(prefix)
+            prefix.append({"role": "system", "content": text.HISTORY_TOOL_RULE})
+            sections.append(dict(kind="history_tool_rule", start=start, end=len(prefix)))
         start = len(prefix)
-        prefix += source["history"]
+        prefix += history
         sections.append(dict(kind="history", start=start, end=len(prefix)))
         moment = datetime.fromisoformat(source["turn"]["created_at"]).astimezone(
             ZoneInfo(self.settings.timezone)
@@ -384,10 +415,12 @@ class ConversationHistory:
                 }
             ),
         )
+        current_message = thaw_message(frozen["current"], original)
+        if current_history_prefix:
+            frozen["current_user_history_prefix"] = current_history_prefix
+            current_message["content"] = prepend_text(current_message["content"], current_history_prefix)
         upstream = deepcopy(body)
-        upstream["messages"] = [thaw_message(m) for m in frozen["prefix"]] + [
-            thaw_message(frozen["current"], original)
-        ]
+        upstream["messages"] = [thaw_message(m) for m in frozen["prefix"]] + [current_message]
         manifest = dict(
             mode="hosted",
             schema_version=1,

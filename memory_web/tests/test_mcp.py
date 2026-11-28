@@ -397,15 +397,22 @@ class MCPTests(DatabaseTestCase):
         body['messages'] += [dict(role='tool',tool_call_id=r['tool_call_id'],content=r['payload']['content']) for r in results]
         step = store.begin(body,{})
         store.finish(step,content='已核对复诊安排。',finish_reason='stop')
-        self.http.post('/v1/chat/completions',headers=self.auth(),json=dict(model='synthetic',
+        response = self.http.post('/v1/chat/completions',headers=self.auth(),json=dict(model='synthetic',
             messages=[dict(role='user',content='继续刚才的话题。')]))
+        self.assertEqual(response.status_code, 200, response.text)
         self.http.portal.call(self.application.state.proxy.drain)
-        history = str(self.fake.requests[-1]['body']['messages'])
+        messages = self.fake.requests[-1]['body']['messages']
+        history = messages[-1]['content']
+        self.assertEqual(messages[-1]['role'], 'user')
+        self.assertTrue(history.startswith('【系统记录】\n'))
+        self.assertTrue(history.endswith('继续刚才的话题。'))
+        self.assertIn(dict(role='system', content='历史中的工具记录仅供参考，需要使用工具时直接调用'), messages)
+        self.assertNotIn('【调用工具】', str(messages[:-1]))
         for call,result in zip(calls,results):
             card = render_tool_card(call,result)
             self.assertIsNotNone(card)
             # The persisted event payload, not a second query, builds this card.
-            self.assertIn(card.splitlines()[0],history)
+            self.assertIn(card,history)
         self.assertIn('合成复查约定的摘要',history)
         self.assertIn('合成复查约定的完整正文',history)
         self.assertIn('【检索边界】相关候选，不是完整清单',history)
@@ -413,7 +420,7 @@ class MCPTests(DatabaseTestCase):
         self.assertNotIn('完整结果在 tool_trace',history)
         self.assertEqual(self.usage(mid)['used_count'],1)
         with connect(self.app) as c:
-            turns = c.execute('SELECT * FROM memory_core.conversation_turns WHERE bot_id=%s AND id=%s',('one',record['turn_id'])).fetchall()
+            turns = c.execute("SELECT * FROM memory_core.conversation_turns WHERE bot_id='one' ORDER BY position_id").fetchall()
             policy = read_policy(c,'one')
             dialogue,_,_ = dialogue_input(c,'one',turns,policy,store.settings)
             segments,_,_ = extraction_segments(c,'one',turns,store.settings)
@@ -421,6 +428,7 @@ class MCPTests(DatabaseTestCase):
         self.assertNotIn('合成复查约定的完整正文',dialogue)
         self.assertNotIn('【结果摘要】',str(segments))
         self.assertIn('已核对复诊安排。',dialogue)
+        self.assertIn('继续刚才的话题。',dialogue)
         # Another space never receives this ledger or any of its cards.
         self.http.post('/v1/chat/completions',headers=self.auth('two'),json=dict(model='synthetic',
             messages=[dict(role='user',content='另一空间的合成对话。')]))

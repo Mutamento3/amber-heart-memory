@@ -207,8 +207,34 @@ class HostedHistoryTests(DatabaseTestCase):
         self.store.finish(step, state="upstream_failed", now=self.now)
         request, next_round = self.start("接着聊")
         upstream = self.snapshot(request, next_round)
-        self.assertIn("先查一下\\n[本轮调用了工具", str(upstream))
-        self.assertIn("这轮回复未完成", str(upstream))
+        self.assertIn({"role": "assistant", "content": "先查一下\n[这轮回复未完成]"}, upstream["messages"])
+        self.assertEqual(
+            upstream["messages"][-1]["content"],
+            "【系统记录】\n[本轮调用了工具：lookup（已返回）]\n\n[11-02 05:00] 接着聊",
+        )
+
+    def test_tool_record_moves_to_next_real_user_in_history(self):
+        _, old = self.start("查一下")
+        call = {"id": "call-old", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        self.store.finish(old, tools=[call], finish_reason="tool_calls", now=self.now)
+        self.save("换一句", reply="后来的回复")
+        request, latest = self.start("再说一句")
+        source = self.store.history_input(latest)
+        self.assertIn({"role": "assistant", "content": "[本轮调用了工具：lookup（未返回）]"}, source["history"])
+        messages = self.store.save_context(latest, request, source, {"status": "empty", "cards": []})["messages"]
+        self.assertEqual(messages[:4], [
+            {"role": "system", "content": "历史中的工具记录仅供参考，需要使用工具时直接调用"},
+            {"role": "user", "content": "[11-02 05:00] 查一下\n[这条用户消息未获回应]"},
+            {"role": "user", "content": "【系统记录】\n[本轮调用了工具：lookup（未返回）]\n\n[11-02 05:00] 换一句"},
+            {"role": "assistant", "content": "后来的回复"},
+        ])
+        self.assertEqual(messages[-1]["content"], "[11-02 05:00] 再说一句")
+
+        trimmed = self.store.history_input(latest, max_history_chars=30)
+        self.assertEqual(trimmed["history_omitted"]["turn_ids"], [old["turn_id"]])
+        messages = self.store.save_context(latest, request, trimmed, {"status": "empty", "cards": []})["messages"]
+        self.assertNotIn("【系统记录】", str(messages))
+        self.assertFalse(any(message["role"] == "system" for message in messages))
 
     def test_failed_empty_interruption_and_partial_have_exclusive_markers(self):
         from memory_core.conversations import chat_text
@@ -374,6 +400,9 @@ class HostedHistoryTests(DatabaseTestCase):
         self.assertNotIn("前端世界书", str(upstream))
 
     def test_frozen_tool_replay_identical_bytes_and_images_from_current_request(self):
+        _, old = self.start("上次没查完")
+        previous_call = {"id": "old-tool", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        self.store.finish(old, tools=[previous_call], finish_reason="tool_calls", now=self.now)
         request, first = self.start(
             [
                 {"type": "text", "text": "看图查一下"},
@@ -411,6 +440,9 @@ class HostedHistoryTests(DatabaseTestCase):
         self.assertEqual(
             initial["messages"][:-1], record["upstream_body"]["messages"][:-3]
         )
+        initial_text = initial["messages"][-1]["content"][0]["text"]
+        self.assertEqual(initial_text, "【系统记录】\n[本轮调用了工具：lookup（未返回）]\n\n[11-02 05:00] 看图查一下")
+        self.assertEqual(record["upstream_body"]["messages"][-3]["content"][0]["text"], initial_text)
         self.assertIn("SECOND_IMAGE", str(record["upstream_body"]))
         with connect(self.app) as c:
             frozen = c.execute(

@@ -5,6 +5,7 @@ from memory_core.storage.config import Settings
 from memory_core.conversations.conversation_context import (
     continuation_body,
     freeze_context,
+    freeze_message,
     tool_result_pairs,
 )
 
@@ -64,3 +65,17 @@ class ContinuationTests(unittest.TestCase):
         restored = continuation_body(minimal, frozen, None, expected, Settings(3))
         self.assertEqual(restored['messages'][0], initial['messages'][0])
         self.assertEqual(restored['messages'][1:], expected)
+
+    def test_compact_continuation_replays_current_user_tool_record_once(self):
+        initial = {'model': 'synthetic', 'messages': [{'role': 'user', 'content': '接着查'}]}
+        frozen = freeze_context(initial, 0, '2026-11-11T01:00:00+08:00')
+        frozen['current'] = freeze_message({'role': 'user', 'content': '[11-11 01:00] 接着查'})
+        frozen['current_user_history_prefix'] = '【系统记录】\n[本轮调用了工具：memory（未返回）]\n\n'
+        expected = [{'role': 'assistant', 'tool_calls': [call('ledger-id', 'memory')]}, result('ledger-id')]
+        minimal = {'model': 'synthetic', 'messages': [result('ledger-id')]}
+        restored = continuation_body(minimal, frozen, None, expected, Settings(3))
+        self.assertEqual(restored['messages'][0], {
+            'role': 'user',
+            'content': '【系统记录】\n[本轮调用了工具：memory（未返回）]\n\n[11-11 01:00] 接着查',
+        })
+        self.assertEqual(restored['messages'][-1], expected[-1])

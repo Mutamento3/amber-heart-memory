@@ -10,6 +10,10 @@ from . import chat_text as text
 def timed_content(content, timestamp, settings):
     moment = datetime.fromisoformat(timestamp).astimezone(ZoneInfo(settings.timezone))
     prefix = text.MESSAGE_TIME.format(time=moment.strftime(text.MESSAGE_TIME_FORMAT))
+    return prepend_text(content, prefix)
+
+
+def prepend_text(content, prefix):
     if isinstance(content, str):
         return prefix + content
     parts = deepcopy(content or [])
@@ -176,6 +180,8 @@ def continuation_body(body, frozen, user_index, expected_tail, settings):
         user = deepcopy(current_user)
         if "current" in frozen:
             user["content"] = timed_content(user.get("content"), frozen["frozen_at"], settings)
+    if history_prefix := frozen.get("current_user_history_prefix"):
+        user["content"] = prepend_text(user["content"], history_prefix)
     result = deepcopy(frozen["parameters"])
     result["messages"] = prefix + [user] + deepcopy(tail)
     result["stream"] = body.get("stream", False)

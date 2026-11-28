@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timezone
 import hashlib
+from itertools import combinations
 import json
 import os
 from pathlib import Path
@@ -14,11 +15,23 @@ from psycopg.types.json import Jsonb
 from .clock import format_timestamp
 from .config import Settings
 from .db import connect
-from .schema import DRAFT_POLICY_ALIGNMENT_VERSION, LATEST_VERSION, MIGRATION_FILES, SUPPORTED_VERSIONS
+from .schema import (
+    CORE_MEMORY_VERSION,
+    DRAFT_POLICY_ALIGNMENT_VERSION,
+    LATEST_VERSION,
+    MIGRATION_FILES,
+    SUPPORTED_VERSIONS,
+    TOPIC_PRESET_VERSION,
+)
 
 
 MIGRATION = Path(__file__).parent.parent / "migrations" / "001_core.sql"
 MIGRATIONS = MIGRATION.parent
+# Physical positions of description and core_facts, dropped by 009 and 021.
+LEGACY_COLUMN_GAPS = (
+    (TOPIC_PRESET_VERSION, "topics", 4),
+    (CORE_MEMORY_VERSION, "space_policies", 12),
+)
 
 
 class InstallationMismatch(RuntimeError):
@@ -45,8 +58,7 @@ def _rebase_import_digests(connection):
             WHERE bot_id=%s AND id=ANY(%s)""", (digest, space_id, group['job_ids']))
 
 
-def catalog_fingerprint(connection):
-    """Hash definitions and grants, excluding data and sequence current values."""
+def _catalog_definitions(connection):
     queries = {
         "schema": """SELECT nspname, pg_get_userbyid(nspowner) AS owner, nspacl::text
             FROM pg_namespace WHERE nspname = 'memory_core'""",
@@ -84,9 +96,53 @@ def catalog_fingerprint(connection):
         "extension": """SELECT e.extname,e.extversion,n.nspname FROM pg_extension e
             JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='vector'""",
     }
-    definitions = {name: connection.execute(query).fetchall() for name, query in queries.items()}
+    return {name: connection.execute(query).fetchall() for name, query in queries.items()}
+
+
+def _catalog_digest(definitions):
     encoded = json.dumps(definitions, sort_keys=True, ensure_ascii=True).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _portable_catalog_digest(definitions):
+    # The query preserves column order; pg_dump can remove gaps in attnum.
+    columns = [
+        {key: value for key, value in column.items() if key != "attnum"}
+        for column in definitions["columns"]
+    ]
+    return _catalog_digest(dict(definitions, columns=columns))
+
+
+def catalog_fingerprint(connection):
+    """Hash definitions and grants, excluding physical column numbers and data."""
+    return _portable_catalog_digest(_catalog_definitions(connection))
+
+
+def _legacy_catalog_matches(definitions, version, recorded):
+    if recorded == _catalog_digest(definitions):
+        return True
+    columns = definitions["columns"]
+    restored_gaps = []
+    for migration, table, gap in LEGACY_COLUMN_GAPS:
+        if version < migration:
+            continue
+        numbers = [column["attnum"] for column in columns if column["relname"] == table]
+        if len(numbers) >= gap and numbers == list(range(1, len(numbers) + 1)):
+            restored_gaps.append((table, gap))
+    # A database may have been restored between the two column drops. Check
+    # each possible old layout without relaxing any other part of the hash.
+    for size in range(1, len(restored_gaps) + 1):
+        for subset in combinations(restored_gaps, size):
+            gaps = dict(subset)
+            adjusted = [
+                dict(column, attnum=column["attnum"] + 1)
+                if column["relname"] in gaps and column["attnum"] >= gaps[column["relname"]]
+                else column
+                for column in columns
+            ]
+            if recorded == _catalog_digest(dict(definitions, columns=adjusted)):
+                return True
+    return False
 
 
 def _grants(connection, application_role, version):
@@ -129,7 +185,7 @@ def _grants(connection, application_role, version):
 
 
 def install(dsn: str, settings: Settings, application_role: str = "memory_app", *, target_version=None, topic_template=None) -> bool:
-    """Return True on first install, False on an unchanged repeat; never repair silently."""
+    """Return True if the schema was installed or upgraded, False at the target version."""
     if not isinstance(settings, Settings):
         raise TypeError("settings must be validated Settings")
     target = LATEST_VERSION if target_version is None else target_version
@@ -180,16 +236,24 @@ def install(dsn: str, settings: Settings, application_role: str = "memory_app", 
                 raise InstallationMismatch("安装配置与已有数据库不一致（维度、时区、业务日或角色）；不会修改已有数据")
             if current_version >= 3 and topic_template is not None and record["default_topic_template"] != topic_template:
                 raise InstallationMismatch("安装主题模板与已有数据库不一致；不会重置已有主题")
-            if record["migration_sha256"] != checksums[1] or record["catalog_sha256"] != catalog_fingerprint(connection):
-                raise InstallationMismatch("迁移内容或数据库结构/权限不匹配；请检查后使用递增迁移")
+            mismatch = "迁移内容或数据库结构/权限不匹配；请检查后使用递增迁移"
+            if record["migration_sha256"] != checksums[1]:
+                raise InstallationMismatch(mismatch)
+            definitions = _catalog_definitions(connection)
+            fingerprint = _portable_catalog_digest(definitions)
+            recorded = record["catalog_sha256"]
+            if recorded != fingerprint and not _legacy_catalog_matches(definitions, current_version, recorded):
+                raise InstallationMismatch(mismatch)
             if current_version >= 2:
                 history = connection.execute("SELECT version,migration_sha256 FROM memory_core.schema_migrations ORDER BY version").fetchall()
                 expected = [{"version": v, "migration_sha256": checksums[v]} for v in range(1, current_version + 1)]
                 if history != expected:
                     raise InstallationMismatch("已应用迁移的记录或文件校验和不匹配")
 
-        if current_version == target:
-            return False
+            if current_version == target:
+                if recorded != fingerprint:
+                    connection.execute("UPDATE memory_core.installation SET catalog_sha256=%s", (fingerprint,))
+                return False
         for version in range(current_version + 1, target + 1):
             migration = migrations[version].replace("__DIMENSIONS__", str(settings.dimensions))
             if version == 9:

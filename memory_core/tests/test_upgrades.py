@@ -1,3 +1,4 @@
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from pathlib import Path
@@ -8,7 +9,10 @@ import psycopg
 
 from memory_core.storage.config import Settings
 from memory_core.storage.db import connect
-from memory_core.storage.install import InstallationMismatch, MIGRATION, MIGRATIONS, catalog_fingerprint, install
+from memory_core.storage.install import (
+    InstallationMismatch, MIGRATION, MIGRATIONS, _catalog_definitions,
+    _catalog_digest, catalog_fingerprint, install,
+)
 from memory_core.storage.postgres import KeywordToken, PostgresStore
 from memory_core.tests.support import DatabaseTestCase
 
@@ -44,6 +48,57 @@ class UpgradeTests(DatabaseTestCase):
         install(self.owner, Settings(768), target_version=2)
         with connect(self.owner) as connection:
             self.assertEqual(catalog_fingerprint(connection), expected)
+
+    def test_legacy_fingerprint_survives_restored_column_numbers(self):
+        settings = Settings(3)
+        install(self.owner, settings, target_version=21)
+        with connect(self.owner) as connection:
+            legacy = _catalog_digest(_catalog_definitions(connection))
+            portable = catalog_fingerprint(connection)
+            connection.execute(
+                "UPDATE memory_core.installation SET catalog_sha256=%s", (legacy,)
+            )
+
+        def restored_catalog(connection):
+            definitions = _catalog_definitions(connection)
+            positions = defaultdict(int)
+            for column in definitions["columns"]:
+                table = column["relname"]
+                positions[table] += 1
+                column["attnum"] = positions[table]
+            return definitions
+
+        with patch("memory_core.storage.install._catalog_definitions", side_effect=restored_catalog):
+            with connect(self.owner) as connection:
+                self.assertNotEqual(_catalog_digest(restored_catalog(connection)), legacy)
+                self.assertEqual(catalog_fingerprint(connection), portable)
+                connection.execute("REVOKE SELECT ON memory_core.memory_items FROM memory_app")
+            with self.assertRaises(InstallationMismatch):
+                install(self.owner, settings, target_version=22)
+            with connect(self.owner) as connection:
+                record = connection.execute(
+                    "SELECT version,catalog_sha256 FROM memory_core.installation"
+                ).fetchone()
+                self.assertEqual(record, {"version": 21, "catalog_sha256": legacy})
+                connection.execute("GRANT SELECT ON memory_core.memory_items TO memory_app")
+            self.assertFalse(install(self.owner, settings, target_version=21))
+            with connect(self.owner) as connection:
+                record = connection.execute(
+                    "SELECT version,catalog_sha256 FROM memory_core.installation"
+                ).fetchone()
+                self.assertEqual(record, {"version": 21, "catalog_sha256": portable})
+                connection.execute(
+                    "UPDATE memory_core.installation SET catalog_sha256=%s", (legacy,)
+                )
+            self.assertTrue(install(self.owner, settings, target_version=22))
+            with connect(self.owner) as connection:
+                record = connection.execute(
+                    "SELECT version,catalog_sha256 FROM memory_core.installation"
+                ).fetchone()
+                self.assertEqual(
+                    record, {"version": 22, "catalog_sha256": catalog_fingerprint(connection)}
+                )
+        self.assertFalse(install(self.owner, settings, target_version=22))
 
     def test_upgrade_failure_preserves_v1_and_data(self):
         store, card, _ = self.legacy_data()

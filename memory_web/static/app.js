@@ -1630,7 +1630,7 @@ async function conversationsPage(main, epoch, read, keepView) {
       events.push({index: tool.event_index, html: `<p class="conversation-tool">${esc(tool.label)} · ${esc(tool.outcome)}</p>`});
     }
     events.sort((a, b) => a.index - b.index);
-    const active = ["pending", "generating", "waiting_tools"].includes(turn.generation_state);
+    const active = ["pending", "generating"].includes(turn.generation_state);
     const select = `<button type="button" class="conversation-select" data-position="${turn.position_id}" aria-label="选择聊天轮次 ${turn.position_id}" aria-pressed="false"${active ? " disabled" : ""}></button>`;
     return `<article class="conversation-turn" data-turn="${turn.id}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
   }

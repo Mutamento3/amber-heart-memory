@@ -402,7 +402,6 @@ class ProxyTests(DatabaseTestCase):
         self.assertEqual(first.status_code, 200, first.text)
         turn_id = int(first.headers['x-memory-turn-id'])
         frozen_time = self.rows('conversation_turns')[0]['frozen_context']['frozen_at']
-        self.assertEqual(self.chat(self.body()).json()['error']['code'], 'space_busy')
         continuation = deepcopy(initial)
         continuation['messages'][0]['content'] = '后来更改的系统词'
         message = first.json()['choices'][0]['message']

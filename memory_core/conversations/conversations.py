@@ -124,11 +124,18 @@ class ConversationStore(ConversationHistory, ConversationRounds, PostgresStore):
             if {turn["position_id"] for turn in turns} != selected:
                 raise ConversationConflict("所选轮次不存在或不属于当前空间", "turn_missing")
             live = [turn for turn in turns if turn["content_deleted_at"] is None]
-            if any(turn["generation_state"] in ("pending", "generating", "waiting_tools") for turn in live):
-                raise ConversationConflict("所选轮次正在回复或等待工具，请等这一轮结束后再删除", "turn_in_progress")
             if not live:
                 return 0, []
             ids = {turn["id"] for turn in live}
+            abandoned_turn_id = None
+            if state["active_turn_id"] in ids:
+                abandoned_turn_id = self._abandon_waiting_tools_locked(c, state, now)
+            if any(
+                turn["id"] != abandoned_turn_id
+                and turn["generation_state"] in ("pending", "generating", "waiting_tools")
+                for turn in live
+            ):
+                raise ConversationConflict("所选轮次正在回复或等待工具，请等这一轮结束后再删除", "turn_in_progress")
             summaries = (
                 invalidate_summaries(c, self.space_id, list(ids), timestamp)
                 if self.schema_version >= SUMMARY_VERSION else []

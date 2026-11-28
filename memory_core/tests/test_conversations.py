@@ -154,9 +154,6 @@ class ConversationTests(DatabaseTestCase):
         original = self.store.begin(BODY, {}, now=moment)
         self.store.finish(original, content='已删除的旧版', finish_reason='tool_calls', now=moment,
                           tools=[{'id': 'call1', 'function': {'name': 'synthetic', 'arguments': '{}'}}])
-        with self.assertRaisesRegex(ConversationConflict, '等待工具'):
-            self.store.delete_positions([original['turn_id']], now=moment)
-        moment += timedelta(minutes=6)
         replacement = self.store.begin(BODY, {'operation': 'regenerate'}, now=moment)
         self.store.finish(replacement, content='已删除的采用版本', finish_reason='stop', now=moment)
         failed = self.store.begin(BODY, {'operation': 'regenerate'}, now=moment)

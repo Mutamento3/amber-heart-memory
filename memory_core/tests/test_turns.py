@@ -208,8 +208,6 @@ class TurnTests(DatabaseTestCase):
             finish_reason="tool_calls",
             now=start + timedelta(seconds=1),
         )
-        with self.assertRaises(ConversationConflict):
-            self.store.begin(body("另一端插话"), {}, now=start + timedelta(seconds=2))
         continuation = deepcopy(initial)
         continuation["messages"][0]["content"] = "前端后来改了系统词"
         continuation["messages"] += [
@@ -222,6 +220,9 @@ class TurnTests(DatabaseTestCase):
         self.assertEqual(second["turn_id"], first["turn_id"])
         self.assertEqual(second["step_index"], 1)
         self.assertEqual(second["upstream_body"]["messages"][0]["content"], "冻结的系统词")
+        with self.assertRaises(ConversationConflict) as raised:
+            self.store.begin(body("另一端插话"), {}, now=start + timedelta(seconds=61))
+        self.assertEqual(raised.exception.code, "space_busy")
         self.store.finish(
             second,
             content="再查一次",
@@ -369,6 +370,31 @@ class TurnTests(DatabaseTestCase):
         )
         self.assertEqual(self.turn(record)["generation_state"], "incomplete")
         self.assertIsNone(self.turn(record)["frozen_context"])
+
+    def test_user_requests_end_tool_wait_before_lease_expires(self):
+        now = datetime.now(timezone.utc)
+        for operation, text in (("new", "新的一句"), ("regenerate", "请查一下"), ("edit", "改过的请求")):
+            with self.subTest(operation=operation):
+                initial = body("请查一下")
+                old = self.store.begin(initial, {"operation": "new"}, now=now)
+                self.store.finish(old, tools=[call("wait")], finish_reason="tool_calls", now=now)
+                intent = {"operation": operation}
+                if operation != "new":
+                    intent["target_turn_id"] = old["turn_id"]
+                now += timedelta(seconds=1)
+                new = self.store.begin(body(text), intent, now=now)
+                abandoned = self.turn(old)
+                self.assertEqual(abandoned["generation_state"], "incomplete")
+                self.assertIsNone(abandoned["frozen_context"])
+                self.assertEqual(datetime.fromisoformat(abandoned["finished_at"]), now.replace(microsecond=0))
+                self.assertTrue(self.store.request_finished(old))
+                self.assertTrue(self.store.finish(new, content="新回复", finish_reason="stop", now=now))
+
+                continuation = deepcopy(initial)
+                continuation["messages"].append({"role": "tool", "tool_call_id": "wait", "content": "迟到的结果"})
+                with self.assertRaises(ConversationConflict) as raised:
+                    self.store.begin(continuation, {"target_turn_id": old["turn_id"]}, now=now)
+                self.assertEqual(raised.exception.code, "no_tool_round")
 
     def test_failed_candidate_can_be_retried_without_replacing_original_early(self):
         original = self.exchange("原句", "旧答案")

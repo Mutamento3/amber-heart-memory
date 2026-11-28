@@ -59,6 +59,30 @@ class ConversationRounds:
         )
 
     @classmethod
+    def _release_locked(cls, c, row):
+        cls._release(c, row["bot_id"])
+        row.update(
+            active_turn_id=None, active_request_id=None, lease_token=None, lease_expires_at=None
+        )
+
+    @classmethod
+    def _abandon_waiting_tools_locked(cls, c, row, now):
+        if row["active_turn_id"] is None or row["active_request_id"] is not None:
+            return None
+        # The last upstream request already finished. Keep its result and the
+        # tool ledger, but discard the context saved for a future continuation.
+        abandoned = c.execute(
+            """UPDATE memory_core.conversation_turns
+            SET generation_state='incomplete',frozen_context=NULL,finished_at=memory_core.format_timestamp(%s)
+            WHERE id=%s AND bot_id=%s AND generation_state='waiting_tools' RETURNING id""",
+            (now, row["active_turn_id"], row["bot_id"]),
+        ).fetchone()
+        if abandoned is None:
+            return None
+        cls._release_locked(c, row)
+        return abandoned["id"]
+
+    @classmethod
     def _expire_locked(cls, c, row, now):
         if row["active_turn_id"] is None or datetime.fromisoformat(row["lease_expires_at"]) > now:
             return False
@@ -70,10 +94,7 @@ class ConversationRounds:
             "UPDATE memory_core.conversation_requests SET state='interrupted',error_stage='lease',error_code='turn_timeout',finished_at=memory_core.format_timestamp(%s) WHERE id=%s AND bot_id=%s AND state IN ('pending','requesting')",
             (now, row["active_request_id"], row["bot_id"]),
         )
-        cls._release(c, row["bot_id"])
-        row.update(
-            active_turn_id=None, active_request_id=None, lease_token=None, lease_expires_at=None
-        )
+        cls._release_locked(c, row)
         return True
 
     @classmethod
@@ -319,9 +340,12 @@ class ConversationRounds:
                         else "request_id_conflict"
                     )
                     raise DuplicateRequest("请求编号已使用，不会再次调用上游", code, prior)
-            if body["messages"][-1]["role"] == "tool":
+            last_role = body["messages"][-1]["role"]
+            if last_role == "tool":
                 return self._continue(c, body, intent, user_index, row, now, timestamp, digest)
-            if row["active_turn_id"] is not None:
+            if row["active_turn_id"] is not None and (
+                last_role != "user" or self._abandon_waiting_tools_locked(c, row, now) is None
+            ):
                 raise ConversationConflict("此空间正在处理，请稍后再发", "space_busy")
             if user_index is None or user_index != len(body["messages"]) - 1:
                 raise ValueError("新一轮请求必须以用户消息结尾")

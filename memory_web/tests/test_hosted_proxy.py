@@ -555,15 +555,30 @@ class HostedProxyTests(DatabaseTestCase):
 
     def test_delete_refuses_history_frozen_in_a_tool_turn(self):
         local = int(self.chat("正在使用的原话").headers["x-memory-turn-id"])
-        self.assertEqual(self.chat("请调用工具", model="synthetic-round").status_code, 200)
+        waiting = self.chat("请调用工具", model="synthetic-round")
+        self.assertEqual(waiting.status_code, 200)
+        waiting_id = int(waiting.headers["x-memory-turn-id"])
         headers = self.login()
-        response = self.http.post("/api/spaces/one/conversations/delete",
-                                  headers=headers, json={"position_ids": [local]})
+        endpoint = "/api/spaces/one/conversations/delete"
+        response = self.http.post(endpoint, headers=headers, json={"position_ids": [local]})
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("当前回复正在使用所选聊天", response.text)
         listing = self.http.get("/api/spaces/one/conversations").json()["items"]
         self.assertEqual(listing[0]["id"], local)
         self.assertEqual(listing[-1]["generation_state"], "waiting_tools")
+
+        response = self.http.post(endpoint, headers=headers, json={"position_ids": [waiting_id]})
+        self.assertEqual(response.json(), {"deleted": 1})
+        with connect(self.app) as c:
+            turn = c.execute("""SELECT generation_state,frozen_context,content_deleted_at
+                FROM memory_core.conversation_turns WHERE id=%s""", (waiting_id,)).fetchone()
+            state = c.execute("""SELECT active_turn_id,active_request_id,lease_token,lease_expires_at
+                FROM memory_core.conversation_space_state WHERE bot_id='one'""").fetchone()
+        self.assertEqual(turn["generation_state"], "incomplete")
+        self.assertIsNone(turn["frozen_context"])
+        self.assertIsNotNone(turn["content_deleted_at"])
+        self.assertTrue(all(value is None for value in state.values()))
+        self.assertEqual(self.chat("继续下一句").status_code, 200)
 
     def test_history_failure_blocks_upstream_but_recall_failure_does_not(self):
         with patch.object(

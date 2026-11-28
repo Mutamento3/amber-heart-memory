@@ -342,10 +342,6 @@ class ConversationHistory:
                 prefix.append({"role": "system", "content": content})
             sections.append(dict(kind=kind, start=start, end=len(prefix)))
         history, current_history_prefix, has_tool_records = _chat_history(source["history_groups"])
-        if has_tool_records:
-            start = len(prefix)
-            prefix.append({"role": "system", "content": text.HISTORY_TOOL_RULE})
-            sections.append(dict(kind="history_tool_rule", start=start, end=len(prefix)))
         start = len(prefix)
         prefix += history
         sections.append(dict(kind="history", start=start, end=len(prefix)))
@@ -357,7 +353,7 @@ class ConversationHistory:
         # pair stays immediately before the real user and is frozen as a unit.
         index = len(prefix)
         supplement = text.SUPPLEMENT
-        for kind, content in (
+        supplement_sections = [
             (
                 "history_omitted",
                 (
@@ -376,7 +372,10 @@ class ConversationHistory:
                 ),
             ),
             ("current_time", text.render_current_time(moment, self.settings.timezone)),
-        ):
+        ]
+        if has_tool_records:
+            supplement_sections.append(("history_tool_rule", text.HISTORY_TOOL_RULE))
+        for kind, content in supplement_sections:
             if content:
                 supplement += "\n\n"
                 start = len(supplement)

@@ -214,7 +214,10 @@ class HostedHistoryTests(DatabaseTestCase):
         )
 
     def test_tool_record_moves_to_next_real_user_in_history(self):
-        _, old = self.start("查一下")
+        self.config.set_persona("one", expected_revision=1, persona="合成人设")
+        earlier = self.save("较早的一句", reply="较早的回复")
+        request, old = self.start("查一下")
+        stable_prefix = self.snapshot(request, old)["messages"][:-3]
         call = {"id": "call-old", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
         self.store.finish(old, tools=[call], finish_reason="tool_calls", now=self.now)
         self.save("换一句", reply="后来的回复")
@@ -222,19 +225,28 @@ class HostedHistoryTests(DatabaseTestCase):
         source = self.store.history_input(latest)
         self.assertIn({"role": "assistant", "content": "[本轮调用了工具：lookup（未返回）]"}, source["history"])
         messages = self.store.save_context(latest, request, source, {"status": "empty", "cards": []})["messages"]
-        self.assertEqual(messages[:4], [
-            {"role": "system", "content": "历史中的工具记录仅供参考，需要使用工具时直接调用"},
+        self.assertEqual(messages[:len(stable_prefix)], stable_prefix)
+        self.assertEqual(messages[len(stable_prefix):-3], [
             {"role": "user", "content": "[11-02 05:00] 查一下\n[这条用户消息未获回应]"},
             {"role": "user", "content": "【系统记录】\n[本轮调用了工具：lookup（未返回）]\n\n[11-02 05:00] 换一句"},
             {"role": "assistant", "content": "后来的回复"},
         ])
+        rule = "历史中的工具记录仅供参考，需要使用工具时直接调用"
+        supplement_index = len(messages) - 3
+        supplement = messages[supplement_index]
+        self.assertEqual(supplement["role"], "user")
+        self.assertTrue(supplement["content"].endswith("\n\n" + rule))
+        section, = [s for s in latest["context_sections"] if s["kind"] == "history_tool_rule"]
+        self.assertEqual((section["start"], section["end"]), (supplement_index, supplement_index + 1))
+        self.assertEqual(supplement["content"][section["content_start"]:section["content_end"]], rule)
         self.assertEqual(messages[-1]["content"], "[11-02 05:00] 再说一句")
 
         trimmed = self.store.history_input(latest, max_history_chars=30)
-        self.assertEqual(trimmed["history_omitted"]["turn_ids"], [old["turn_id"]])
+        self.assertEqual(trimmed["history_omitted"]["turn_ids"], [earlier["turn_id"], old["turn_id"]])
         messages = self.store.save_context(latest, request, trimmed, {"status": "empty", "cards": []})["messages"]
         self.assertNotIn("【系统记录】", str(messages))
-        self.assertFalse(any(message["role"] == "system" for message in messages))
+        self.assertNotIn(rule, str(messages))
+        self.assertNotIn("history_tool_rule", [s["kind"] for s in latest["context_sections"]])
 
     def test_failed_empty_interruption_and_partial_have_exclusive_markers(self):
         from memory_core.conversations import chat_text

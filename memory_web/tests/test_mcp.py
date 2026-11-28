@@ -406,7 +406,8 @@ class MCPTests(DatabaseTestCase):
         self.assertEqual(messages[-1]['role'], 'user')
         self.assertTrue(history.startswith('【系统记录】\n'))
         self.assertTrue(history.endswith('继续刚才的话题。'))
-        self.assertIn(dict(role='system', content='历史中的工具记录仅供参考，需要使用工具时直接调用'), messages)
+        self.assertEqual(messages[-3]['role'], 'user')
+        self.assertIn('历史中的工具记录仅供参考，需要使用工具时直接调用', messages[-3]['content'])
         self.assertNotIn('【调用工具】', str(messages[:-1]))
         for call,result in zip(calls,results):
             card = render_tool_card(call,result)

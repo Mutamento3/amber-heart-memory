@@ -184,10 +184,10 @@ def deepseek_days(files, settings, max_json_bytes):
 
                 # Only the manifest, index and indexed session JSON are opened.
                 # Account data and attachments are never read from the archive.
+                # The manifest only marks a DeepSeek export. Its format version
+                # is not checked: the structure checks below decide what is readable.
                 with document('manifest.json') as manifest:
-                    version = _deepseek_object(manifest).get('export_format_version')
-                    if type(version) is not int or version != 3:
-                        raise ImportFormatError('暂只支持 DeepSeek 官方导出格式版本 3，请核对压缩包中的 manifest.json')
+                    _deepseek_object(manifest)
                 seen = set()
                 with document('chat_session_index.json') as index:
                     for record in json_records(index):

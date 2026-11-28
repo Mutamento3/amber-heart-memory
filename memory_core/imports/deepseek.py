@@ -5,7 +5,7 @@ from datetime import datetime
 from .import_formats import ImportFormatError, _segment, _split
 
 
-FORMAT_ERROR = "DeepSeek 导出格式不完整或无法识别，请上传完整的官方 ZIP（格式版本 3）"
+FORMAT_ERROR = "DeepSeek 导出格式不完整或无法识别，请上传完整的官方 ZIP"
 
 
 def _utc_time(value):

@@ -7,6 +7,6 @@
 3. In the Amber Heart admin web app, go to **Settings → Import → Go to import** (设置 → 导入记忆 → 去导入), choose **DeepSeek**, and upload the entire ZIP.
 4. The preview lists conversations with all selected by default. Uncheck any conversations you want to leave out, then confirm the import.
 
-Amber Heart supports the official ZIP export format version 3. It imports chat text from the selected branch of each conversation and skips account data, reasoning, search activity, images, and other attachments.
+Amber Heart supports the official ZIP export. The export format version is not checked: if the contents can be read, they can be imported. It imports chat text from the selected branch of each conversation and skips account data, reasoning, search activity, images, and other attachments.
 
 The page selects the needed files on your device before uploading. If it cannot filter the archive, it uploads the original ZIP. The upload limit of 90 MiB applies to the data actually sent.

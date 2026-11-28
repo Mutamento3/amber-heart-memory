@@ -371,9 +371,9 @@ class WebImportTests(DatabaseTestCase):
         self.assertEqual((repeated["material_count"], repeated["skipped_count"]), (0, 2))
 
     def test_deepseek_bad_archive_returns_clear_error_and_rolls_back(self):
-        response = self.upload("deepseek", deepseek_zip(version=1), "deepseek_data.zip")
+        response = self.upload("deepseek", deepseek_zip(omit=("manifest.json",)), "deepseek_data.zip")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("格式版本 3", response.json()["detail"])
+        self.assertIn("DeepSeek 导出格式不完整", response.json()["detail"])
         broken = deepseek_session("synthetic-broken")
         del broken["current_message_id"]
         response = self.upload("deepseek", deepseek_zip(deepseek_session(), broken), "deepseek_data.zip")

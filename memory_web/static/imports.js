@@ -53,7 +53,7 @@ export async function importsPage(main, {api, read, keepView, url, esc, state, e
       chatgpt: "直接选择官方导出 ZIP。只读取最终选定的聊天分支。",
       claude: "直接选择 Claude 官方导出 ZIP。预览时可以按对话选择。",
       gemini: "在 Google Takeout 的 My Activity → Gemini Apps 选择 JSON 格式，再直接选择导出 ZIP。日期范围内的普通聊天和 Gem 聊天都会导入。",
-      deepseek: "上传完整的 DeepSeek 官方导出 ZIP（格式版本 3）。只导入当前选择分支的聊天文字。",
+      deepseek: "上传完整的 DeepSeek 官方导出 ZIP。只导入当前选择分支的聊天文字。",
       kelivo: "在 Kelivo 选择「聊天记录」和「助手」。想导入记忆时再选「记忆」。上传未加密的 ZIP。接入 Amber Heart 之后的聊天已经记录过了，导入时把结束日期选在接入之前。",
       operit: "在 Operit 的「设置 → 数据备份与恢复」里，分别导出「聊天记录」的 JSON 或「记忆库」。可以选一个 JSON、同时选两个 JSON，或上传装有导出文件的 ZIP。接入 Amber Heart 之后的聊天已经记录过了，导入时把结束日期选在接入之前。",
       memory: "每条以 ## 日期 开头，下面写正文，可以写多行。只记得月份或年份就写 ## 2025-03 或 ## 2025，不记得日期写 ## 未注明；支持 .md 和 .txt 文件。用名字来写，不要用“我”“他”，设置里填的名字或又名都可以。写得越具体，整理出来的卡片越有用。也可以把下面的示例发给你的 AI，让它照这个格式帮你整理。",

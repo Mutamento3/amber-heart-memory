@@ -106,10 +106,12 @@ class DeepSeekImportTests(unittest.TestCase):
         self.assertEqual(days[0].conversation_key, days[1].conversation_key)
         self.assertNotEqual(days[0].source_key, days[1].source_key)
 
-    def test_unknown_version_and_missing_files_are_friendly_errors(self):
-        for version in (1, 2, True, "3", None):
-            with self.subTest(version=version), self.assertRaisesRegex(ImportFormatError, "格式版本 3"):
-                self.parse(deepseek_zip(version=version))
+    def test_format_version_is_not_checked_and_missing_files_are_friendly_errors(self):
+        expected = self.parse(deepseek_zip())
+        for version in (4, 2, "3", None):
+            with self.subTest(version=version):
+                days = self.parse(deepseek_zip(version=version))
+                self.assertEqual([day.segments for day in days], [day.segments for day in expected])
         for name in ("manifest.json", "chat_session_index.json", "chat_sessions/synthetic-chat.json"):
             with self.subTest(name=name), self.assertRaisesRegex(ImportFormatError, "DeepSeek 导出格式不完整"):
                 self.parse(deepseek_zip(omit=(name,)))

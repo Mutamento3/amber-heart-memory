@@ -1,6 +1,7 @@
 import {coreMemoryPage, memosPage} from "./memos.js?v=40";
 import {importsPage} from "./imports.js?v=77";
 import {readPersonaFile} from "./persona-file.js?v=1";
+import {MANUAL} from "./manual.js?v=1";
 
 const basePath = new URL(import.meta.url).pathname.replace(
   /\/static\/app\.js$/,
@@ -118,12 +119,25 @@ const encodedSpace = () => encodeURIComponent(state.space);
 const url = (suffix) => `/api/spaces/${encodedSpace()}${suffix}`;
 const NAV_PAGES = ["overview", "review", "memories", "conversations", "settings"];
 const OVERVIEW_PAGES = ["diaries", "summaries", "core-memory", "bookmarks"];
+const SETTINGS_PAGES = {
+  "set-together": ["相识日", "ANNIVERSARY"],
+  "set-people": ["参与者", "PARTICIPANTS"],
+  "set-key": ["访问钥匙", "ACCESS KEY"],
+  "set-mcp": ["MCP 连接", "MCP CONNECTION"],
+  "set-persona": ["人设", "PERSONA"],
+  "set-import": ["导入", "BRING YOUR MEMORIES"],
+  "set-review": ["自动入库", "AUTO APPROVAL"],
+  "set-bookmarks": ["记忆书签", "BOOKMARKS"],
+  "set-manual": ["使用说明", "USER GUIDE"],
+};
 const PAGES = [...NAV_PAGES, ...OVERVIEW_PAGES, "imports"];
 // Pages reached from the overview get a back arrow and keep the overview tab lit.
 const FROM_OVERVIEW = OVERVIEW_PAGES;
+const FROM_SETTINGS = [...Object.keys(SETTINGS_PAGES), "imports"];
 const pageCache = new Map();
 let pageDataRevision = 0;
-const configurationPages = ["settings", "core-memory", "overview", "memories", "review", "imports"];
+const configurationViews = ["settings", "set-together", "set-people", "set-persona", "set-review", "set-bookmarks", "core-memory"];
+const configurationPages = [...configurationViews, "overview", "memories", "review", "imports"];
 const reviewPages = ["review", "overview", "memories"];
 const affectedPages = {
   configuration: configurationPages,
@@ -158,7 +172,7 @@ function invalidatePageData(path, updated) {
   // Configuration writes return the same full document as the page read.
   if (updated && pages === configurationPages) {
     const data = new Map([[url("/configuration"), JSON.stringify(updated)]]);
-    for (const page of ["settings", "core-memory"]) pageCache.set(page, {page, variant: null, data});
+    for (const page of configurationViews) pageCache.set(page, {page, variant: null, data});
   }
 }
 const LEGACY = {
@@ -179,6 +193,10 @@ const title = (page) =>
   })[page];
 function pageFromPath() {
   const page = pagePath().slice(1).split("/")[0];
+  if (page === "settings") {
+    const section = "set-" + new URLSearchParams(location.search).get("section");
+    if (Object.hasOwn(SETTINGS_PAGES, section)) return section;
+  }
   if (page === "memories") {
     const tab = new URLSearchParams(location.search).get("tab");
     if (tab === "diaries" || tab === "conversations") return tab;
@@ -186,6 +204,7 @@ function pageFromPath() {
   return LEGACY[page] || (PAGES.includes(page) ? page : "overview");
 }
 function pageURL(page) {
+  if (Object.hasOwn(SETTINGS_PAGES, page)) return appPath("/settings?section=" + page.slice(4));
   return appPath("/" + page);
 }
 function message(text) {
@@ -515,7 +534,7 @@ function badgeHTML() {
 function renderNavigation() {
   const nav = $(".topbar nav");
   if (!nav) return;
-  const page = !state.space || state.page === "imports" ? "settings"
+  const page = !state.space || FROM_SETTINGS.includes(state.page) ? "settings"
     : FROM_OVERVIEW.includes(state.page) ? "overview" : state.page;
   nav.innerHTML = NAV_PAGES.map(item => `<a href="${appPath("/" + item)}" data-page="${item}" class="${page === item ? "active" : ""}"${page === item ? ' aria-current="page"' : ""}>${navLabel(item)}</a>`).join("");
   $$("[data-page]", nav).forEach(a => a.onclick = async event => {
@@ -557,6 +576,7 @@ const PAGE_INFO = {
   "core-memory": ["核心记忆", "CORE MEMORY"],
   bookmarks: ["记忆书签", "BOOKMARKS"],
   settings: ["设置", "MAKE IT YOURS"],
+  ...SETTINGS_PAGES,
 };
 function brandHTML() {
   return '<span class="brand-mark"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M20 2.4C30.6 2.4 36.6 11 36.6 23.6v8.2q0 5.8-6.6 5.8H16.2C6.6 37.6 2.4 32.6 2.4 23 2.4 12.2 8.4 2.4 20 2.4Z" fill="var(--card)" stroke="var(--muted)" stroke-width=".6"/><path d="M11.5 27.4q8.4-1 14.6-12.4" stroke="#b07a7f" stroke-width=".7" stroke-linecap="round"/><path d="M15 23.4q-2.6-6.4-5-7.8M17.2 21.2q-6.6-1.8-7.2-5.2" stroke="#b07a7f" stroke-width=".55" stroke-linecap="round"/><path d="M12.6 19.6q-2.6-.6-3.2-3.2q2.6.4 3.2 3.2Z" fill="#dcaeb0"/><path d="M13.4 18.3q-.4-2.4 1.2-4q.8 2.4-1.2 4Z" fill="#e6c4c5"/><path d="M14 26.6q-1.8 1.8-4.2 1.4q1.6-2 4.2-1.4Z" fill="#e6c4c5"/><circle cx="9.7" cy="15.4" r="1.15" fill="#d99ea3"/><path d="M24 24C17.5 20 15.8 15.6 18.2 13c2.1-2.2 4.8-1.2 5.8 1 1-2.2 3.7-3.2 5.8-1 2.4 2.6.7 7-5.8 11Z" fill="var(--pink)"/><path d="M24 24c4-2.6 7-5.6 6.6-8.8-1.8 3.2-4.2 5.4-6.6 6.6Z" fill="#a9636b"/><path d="M19 14.6q.6-1.6 2.2-1.6" stroke="#fff" stroke-opacity=".75" stroke-width=".6" stroke-linecap="round"/></svg></span><span class="brand-text"><span class="brand-name">Amber Heart</span><span class="brand-sub">琥珀之心 · 记忆管理</span></span>';
@@ -565,8 +585,9 @@ function shell() {
   const page = state.space ? state.page : "settings";
   const [heading, eyebrow] = PAGE_INFO[page];
   document.title = `${heading} · Amber Heart`;
-  const back = FROM_OVERVIEW.includes(page)
-    ? `<a class="back-arrow" href="${pageURL("overview")}" data-go="overview" aria-label="返回概览">‹</a>`
+  const parent = FROM_OVERVIEW.includes(page) ? "overview" : FROM_SETTINGS.includes(page) ? "settings" : null;
+  const back = parent
+    ? `<a class="back-arrow" href="${pageURL(parent)}" data-go="${parent}" aria-label="返回${title(parent)}">‹</a>`
     : "";
   const action = page === "conversations"
     ? '<button type="button" class="quiet conversation-delete-toggle" hidden>删除</button>' : "";
@@ -621,10 +642,11 @@ async function navigate(page, push = true) {
   const epoch = state.epoch;
   if (push) history.pushState({}, "", pageURL(page));
   shell();
+  if (push && (page === "settings" || FROM_SETTINGS.includes(page))) window.scrollTo(0, 0);
   let main = $("#main");
   if (state.space && page !== "overview") void refreshBadge(main.parentElement);
-  const view = {filter: state.filter, topic: state.memoryTopic, section: state.settingsSection};
-  state.memoryTopic = state.settingsSection = null;
+  const view = {filter: state.filter, topic: state.memoryTopic};
+  state.memoryTopic = null;
   const variant = page === "review" ? view.filter : page === "memories" ? view.topic : null;
   const key = page === "review" ? `${page}:${variant}` : variant ? "memories:topic" : page;
   const entry = pageCache.get(key);
@@ -708,7 +730,9 @@ function renderPage(main, page, epoch, view, read, fresh, keepView = () => {}) {
     case "imports": return importsPage(main, deps);
     case "bookmarks": return memosPage(main, deps);
     case "core-memory": return coreMemoryPage(main, deps);
-    case "settings": return settingsPage(main, false, epoch, view.section, read);
+    case "settings": return settingsPage(main, false, epoch, read);
+    case "set-manual": return manualPage(main);
+    default: return settingPage(main, page, epoch, read);
   }
 }
 window.addEventListener("popstate", async () => {
@@ -732,8 +756,6 @@ function wireGo(parent) {
       (element.onclick = async (event) => {
         event.preventDefault();
         if (!(await allowLeave())) return;
-        // e.g. the empty memory list links straight to the import section of settings.
-        if (element.dataset.section) state.settingsSection = element.dataset.section;
         navigate(element.dataset.go);
       }),
   );
@@ -751,7 +773,7 @@ async function overviewPage(main, epoch, read, fresh) {
     ? ""
     : data.acquaintance_date
       ? `相识日是 ${esc(data.acquaintance_date)}，到那天开始计算相伴天数。`
-      : `从 ${esc(data.created_date)} 开始收藏。<a href="${appPath("/settings")}" data-go="settings">填写相识日</a>，这里会改为显示你们相伴的天数。`;
+      : `从 ${esc(data.created_date)} 开始收藏。<a href="${pageURL("set-together")}" data-go="set-together">填写相识日</a>，这里会改为显示你们相伴的天数。`;
   const used = data.topics.filter((topic) => topic.cards > 0);
   const largest = Math.max(1, ...used.map((topic) => topic.cards));
   const idle = data.topics.length - used.length;
@@ -860,11 +882,10 @@ async function onboardingCard(main, epoch) {
     remember();
     return;
   }
-  const go = (section, text) => `<a href="#" data-go="settings" data-section="${section}">${text}</a>`;
-  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">照接入指南设置好，发一条消息就算完成。</span><a href="#" class="open-connect">看接入指南</a>`}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")} · <a href="#" class="open-guide">了解记忆怎么用</a></p></section>`);
+  const go = (page, text) => `<a href="${pageURL(page)}" data-go="${page}">${text}</a>`;
+  $(".overview-entries", main).insertAdjacentHTML("afterend", `<section class="onboarding card" aria-labelledby="onboarding-title"><div class="onboarding-head"><h2 id="onboarding-title">开始使用</h2><button type="button" class="quiet" id="dismiss-onboarding">我知道了</button></div><ol class="onboarding-steps"><li class="done">填写你和 TA 的名字</li><li class="${hasKey ? "done" : ""}">生成访问钥匙${hasKey ? "" : " · " + go("set-key", "去设置")}</li><li class="${connected ? "done" : ""}">在聊天应用里连上记忆库${connected ? "" : `<span class="meta">照接入指南设置好，发一条消息就算完成。</span><a href="#" class="open-connect">看接入指南</a>`}</li></ol><p class="onboarding-optional meta">可选：${go("set-persona", "写人设")} · ${go("set-import", "导入以前的记忆")} · ${go("set-manual", "了解记忆怎么用")}</p></section>`);
   const card = $(".onboarding", main);
   wireGo(card);
-  $(".open-guide", card).onclick = (event) => { event.preventDefault(); openGuide(); };
   const connect = $(".open-connect", card);
   if (connect) connect.onclick = (event) => { event.preventDefault(); openConnectGuide(); };
   $("#dismiss-onboarding", card).onclick = () => {
@@ -872,15 +893,6 @@ async function onboardingCard(main, epoch) {
     card.remove();
   };
 }
-// Fixed explanation of the five kinds of memory, shown as a paged card; it reads nothing from the server.
-const GUIDE_ROWS = [
-  ["核心记忆", "关于你的长期事实和你们的约定。", "你自己写，改了从下一轮生效。", "每轮都带给 TA。"],
-  ["记忆书签", "最近的状况：身体、正在做的事、日常小事等。", "TA 聊天时顺手记下，每天凌晨整理进来。书签不会变成记忆卡片。", "每轮都带给 TA。"],
-  ["日记", "TA 写的每日回顾。", "每天凌晨根据前一天的聊天写一篇。", "每轮都带最近三天的日记。"],
-  ["及时摘要", "当天聊得多了，把早些时候的聊天浓缩成摘要，聊得再久前面的事也不会忘。", "系统自动写，当天聊到一定长度就写一份。", "每轮都带当天的摘要。"],
-  ["记忆卡片", "一件件具体的经历，长期保存。", "每天凌晨从前一天的聊天里抽出来，先进待审核，审过或到时间自动收录后入库。", "每轮自动召回和这轮聊天最相关的 5 张，不是全部都带。"],
-];
-const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p><p class="meta guide-note">最近的聊天原文也每轮都带，开新对话不会清空。想让 TA 忘掉某几轮，到“记录”页删除。</p>';
 function stored(key) {
   try { return localStorage.getItem(key); } catch { return "unavailable"; }
 }
@@ -901,36 +913,6 @@ function popupDialog(id, onClose) {
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
   root.append(dialog);
   return [dialog, close];
-}
-function openGuide() {
-  if ($("#guide-dialog")) return;
-  const pages = [GUIDE_INTRO, ...GUIDE_ROWS.map(([name, what, how, when]) => `<h2>${name}</h2><p class="guide-what">${what}</p><div class="guide-fact"><span>怎么来的</span><p>${how}</p></div><div class="guide-fact"><span>TA 什么时候看到</span><p>${when}</p></div>`)];
-  const [dialog, close] = popupDialog("guide-dialog", () => store("amber-guide-seen", "1"));
-  let index = 0;
-  const go = (step) => {
-    index = Math.min(pages.length - 1, Math.max(0, index + step));
-    render();
-  };
-  const render = () => {
-    const last = index === pages.length - 1;
-    dialog.innerHTML = `<div class="popup-top"><span class="eyebrow">记忆说明</span>${last ? "" : '<button type="button" class="quiet popup-skip">跳过</button>'}</div><div class="guide-page">${pages[index]}</div><div class="guide-nav"><button type="button" class="quiet guide-prev" aria-label="上一页"${index ? "" : " disabled"}>←</button><span class="meta">${index + 1} / ${pages.length}</span>${last ? '<button type="button" class="primary guide-done">我知道了</button>' : '<button type="button" class="quiet guide-next" aria-label="下一页">→</button>'}</div>`;
-    $(".guide-prev", dialog).onclick = () => go(-1);
-    if (last) $(".guide-done", dialog).onclick = close;
-    else {
-      $(".guide-next", dialog).onclick = () => go(1);
-      $(".popup-skip", dialog).onclick = close;
-    }
-  };
-  let startX = null;
-  dialog.addEventListener("touchstart", (event) => { startX = event.touches[0].clientX; }, { passive: true });
-  dialog.addEventListener("touchend", (event) => {
-    if (startX === null) return;
-    const moved = event.changedTouches[0].clientX - startX;
-    startX = null;
-    if (Math.abs(moved) > 50) go(moved < 0 ? 1 : -1);
-  });
-  render();
-  dialog.showModal();
 }
 // Step-by-step connection guide for the two recommended chat apps, with this
 // installation's own address and key filled in. Icons are drawn to match the apps.
@@ -1049,7 +1031,7 @@ async function openConnectGuide() {
   render("kelivo");
   dialog.showModal();
 }
-// Release notes are the maintainer's own Markdown; only bullets, bold and code are rendered.
+// Release notes and the user guide use only paragraphs, bullets, bold and code.
 function notesHTML(text) {
   const inline = (value) => esc(value).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
   let html = "";
@@ -1076,11 +1058,8 @@ function openUpdate(update) {
   $(".dialog-actions .primary", dialog).onclick = close;
   dialog.showModal();
 }
-// Pops at most one card per overview visit: the explanation once per browser, then each new version once.
 function autoPopup(update) {
-  if ($("dialog[open]")) return;
-  if (!stored("amber-guide-seen")) openGuide();
-  else if (update && !["unavailable", update.latest].includes(stored("amber-update-seen"))) openUpdate(update);
+  if (update && !$("dialog[open]") && !["unavailable", update.latest].includes(stored("amber-update-seen"))) openUpdate(update);
 }
 const reviewPath = (filter) => url(`/drafts?status=${filter}&all_items=true`);
 const reviewDetailPath = (item) => url(item.item_kind === "topic_summary" ? `/topic-summaries/${item.id}` : `/drafts/${item.id}`);
@@ -1532,8 +1511,15 @@ function lines(value) {
 function participantsForm(config, initialize) {
   return `<form id="participants-form"><div class="people">${["user", "assistant"].map((role) => `<section class="person"><h3>${role === "user" ? "你" : "TA"}</h3>${field("名字", role + "_name", config?.participants[role].name || "", "text", `required maxlength="200" placeholder="${role === "user" ? "例：林小满" : "例：顾言"}"`)}<label>又名（如小名）<input name="${role}_aliases" type="text" maxlength="1000" placeholder="${role === "user" ? "例：满满、小满" : "例：阿言、言言"}" value="${esc(config?.participants[role].aliases.join("、") || "")}"></label></section>`).join("")}</div><p class="muted">又名可以空着，也可以填多个，用顿号隔开。聊天里出现这些名字时，记忆系统会知道说的是同一个人。想让 TA 怎么称呼你，请写在人设或核心记忆里。</p>${initialize ? `<label>记忆主题模板（创建后固定）<select name="topic_template"><option value="lover">恋人（默认）</option><option value="general">通用</option></select></label><p class="muted" id="template-preview"></p>` : ""}<p class="error" role="alert"></p><div class="actions"><button class="primary">${initialize ? "创建空间" : "保存参与者"}</button></div></form>`;
 }
-function wireParticipants(form, config, initialize, writeConfig = (write) => write()) {
+function wireParticipants(form, config, initialize) {
   track(form);
+  const submit = $(".actions button", form);
+  if (!initialize) {
+    submit.setAttribute("aria-live", "polite");
+    const reset = () => { submit.textContent = "保存参与者"; };
+    form.addEventListener("input", reset);
+    form.addEventListener("change", reset);
+  }
   if (initialize) {
     const preview = () =>
       ($("#template-preview").textContent = "记忆会按这些主题归类：" + state.contract.topic_presets[
@@ -1554,7 +1540,7 @@ function wireParticipants(form, config, initialize, writeConfig = (write) => wri
     try {
       // 首发一个安装只对应一位 AI，空间编号固定，不让用户填写。
       const space = initialize ? "default" : state.space;
-      const latest = await writeConfig(() => api(
+      const latest = await api(
         `/api/spaces/${encodeURIComponent(space)}/participants`,
         {
           method: "PUT",
@@ -1568,8 +1554,12 @@ function wireParticipants(form, config, initialize, writeConfig = (write) => wri
             ...(initialize ? { topic_template: values.topic_template } : {}),
           },
         },
-      ));
+      );
       state.dirty = false;
+      if (!initialize) {
+        Object.assign(config, latest);
+        submit.textContent = "已保存 ✓";
+      }
       state.spaces = await api("/api/spaces");
       if (initialize) {
         await finishInitialize();
@@ -1577,11 +1567,6 @@ function wireParticipants(form, config, initialize, writeConfig = (write) => wri
       }
       state.space = space;
       sessionStorage.setItem("memory-space", space);
-      // The AI name labels the space selector, so refresh the header too.
-      const select = $("#space");
-      const option = select?.querySelector(`option[value="${CSS.escape(space)}"]`);
-      if (option) option.textContent = latest.participants.assistant.name;
-      message("参与者已保存");
     } catch (error) {
       // The space may have been created even though the reply never arrived;
       // a retry would then only hit "template already chosen". Check first.
@@ -1710,6 +1695,8 @@ async function conversationsPage(main, epoch, read, keepView) {
     const assistant = turn.messages.filter(m =>
       m.role === "assistant" && (m.display_text ?? bodyText(m.content_parts)).trim()
     ).pop();
+    const incomplete = turn.generation_state === "incomplete" || turn.messages.some(m => m.content_state === "incomplete");
+    const incompleteMessage = incomplete ? assistant || turn.messages.find(m => m.role === "user") : null;
     const usage = assistant ? tokenUsageHTML(turn.requests || []) : "";
     const events = turn.messages.map((m, index) => {
       const ai = m.role === "assistant";
@@ -1721,7 +1708,7 @@ async function conversationsPage(main, epoch, read, keepView) {
       const meta = m === assistant
         ? `<div class="conversation-reply-meta">${usage}<span class="conversation-summary" aria-live="polite"${progress ? "" : " hidden"}>${summaryHTML(progress)}</span></div>`
         : "";
-      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span><time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time>${m.content_state === "incomplete" ? '<span class="conversation-state">未完成</span>' : ""}</div><p class="conversation-body">${esc(body)}</p>${recall}${meta}</section>`;
+      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span>${m === incompleteMessage ? '<span class="conversation-state">未完成</span>' : ""}<time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time></div><p class="conversation-body">${esc(body)}</p>${recall}${meta}</section>`;
       return {index: m.event_index ?? index, html};
     });
     for (const tool of turn.tool_calls || []) {
@@ -1730,7 +1717,8 @@ async function conversationsPage(main, epoch, read, keepView) {
     events.sort((a, b) => a.index - b.index);
     const active = ["pending", "generating"].includes(turn.generation_state);
     const select = `<button type="button" class="conversation-select" data-position="${turn.position_id}" aria-label="选择聊天轮次 ${turn.position_id}" aria-pressed="false"${active ? " disabled" : ""}></button>`;
-    return `<article class="conversation-turn" data-turn="${turn.id}" data-business-day="${esc(turn.business_date)}" data-summarized="${Boolean(turn.summarized)}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
+    const turnStatus = turn.generation_state === "incomplete" && incompleteMessage ? "" : status[turn.generation_state];
+    return `<article class="conversation-turn" data-turn="${turn.id}" data-business-day="${esc(turn.business_date)}" data-summarized="${Boolean(turn.summarized)}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${turnStatus ? `<p class="conversation-state">${turnStatus}</p>` : ""}</article>`;
   }
   function daysHTML(items) {
     const days = new Map();
@@ -1961,7 +1949,7 @@ async function conversationsPage(main, epoch, read, keepView) {
   observer.observe(more);
 }
 
-async function settingsPage(main, initialize, epoch, section, read) {
+async function settingsPage(main, initialize, epoch, read) {
   if (initialize) {
     main.innerHTML = `<section class="settings-section"><h2>初始化记忆空间</h2><p class="muted">这一套记忆库，留给你和 TA 共同经历的记忆。</p>${participantsForm(null, true)}</section>${logoutHTML()}`;
     wireParticipants($("#participants-form"), null, true);
@@ -1971,61 +1959,134 @@ async function settingsPage(main, initialize, epoch, section, read) {
   const config = await read(url("/configuration"));
   if (epoch !== state.epoch) return;
   const spaceSection = state.spaces.length > 1
-    ? `<section class="settings-section space-settings"><h2>记忆空间</h2><p class="muted">每个空间有各自的参与者、主题和记忆。</p><label>当前空间<select id="space" aria-label="记忆空间">${state.spaces.map((space) => `<option value="${esc(space.id)}" ${space.id === state.space ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label></section>`
+    ? `<label class="space-settings"><span>记忆空间</span><select id="space">${state.spaces.map((space) => `<option value="${esc(space.id)}" ${space.id === state.space ? "selected" : ""}>${esc(space.name)}</option>`).join("")}</select></label>`
     : "";
-  main.innerHTML = `${spaceSection}<div class="settings-index" role="group" aria-label="设置分区"><button type="button" data-jump="set-together">相识日</button><button type="button" data-jump="set-people">参与者</button><button type="button" data-jump="set-key">访问钥匙</button><button type="button" data-jump="set-mcp">MCP 连接</button><button type="button" data-jump="set-persona">人设</button><button type="button" data-jump="set-import">导入</button><button type="button" data-jump="set-review">自动入库</button><button type="button" data-jump="set-bookmarks">记忆书签</button></div><section class="settings-section" id="set-together" aria-labelledby="together-title"><h2 id="together-title">相识日</h2><p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p><form id="together-form" class="together"><div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form></section><section class="settings-section" id="set-people" aria-labelledby="people-title"><h2 id="people-title">参与者</h2><p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}</section><section class="settings-section" id="set-key" aria-labelledby="key-title"><h2 id="key-title">访问钥匙</h2><p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p><div class="mcp-field"><label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label><button type="button" id="copy-proxy">复制</button></div><div id="key-content"><p class="loading">正在读取…</p></div><button type="button" class="guide-entry connect-entry"><span><strong>接入指南</strong><span class="meta">Kelivo、Operit 一步步怎么设置</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button></section><section class="settings-section" id="set-mcp" aria-labelledby="mcp-title"><h2 id="mcp-title">MCP 连接</h2><p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p><div id="mcp-content"></div></section><section class="settings-section" id="set-persona" aria-labelledby="persona-title"><h2 id="persona-title">人设（系统提示词）</h2><p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p><form id="persona-form"><div class="persona-import"><button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span><input type="file" id="persona-file" hidden></div><p class="hint" id="persona-active" ${(config.persona || "").trim() ? "" : "hidden"}>现在聊天应用里的系统提示词、角色卡和世界书都不会生效。想用聊天应用自己的，把这里清空就行。</p><label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="注意：这里填了就会替换聊天应用里的系统提示词（包括角色卡、世界书），两边都填的话以这里为准；不填就用聊天应用自己的。">${esc(config.persona || "")}</textarea></label><p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-import" aria-labelledby="import-title"><h2 id="import-title">导入</h2><p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p><button type="button" class="primary" data-go="imports">去导入</button></section><section class="settings-section" id="set-review" aria-labelledby="auto-approval-title"><h2 id="auto-approval-title">自动入库</h2><form id="auto-approval-form"><label class="check" for="auto-approval"><input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label><p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form></section><section class="settings-section" id="set-bookmarks" aria-labelledby="bookmark-settings-title"><h2 id="bookmark-settings-title">记忆书签</h2><form id="period-notes-form"><label class="check" for="period-notes"><input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label><p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form></section><button type="button" class="guide-entry"><span><strong>记忆说明</strong><span class="meta">核心记忆、书签、日记、摘要和卡片有什么区别</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button>${config.version ? `<p class="meta app-version">当前版本 v${esc(config.version)}</p>` : ""}${logoutHTML()}`;
+  const rows = Object.entries(SETTINGS_PAGES).map(([page, [label]]) =>
+    `<a class="setting-row" href="${pageURL(page)}" data-go="${page}"><span>${label}</span><span aria-hidden="true">›</span></a>`,
+  ).join("");
+  main.innerHTML = `${spaceSection}<nav class="settings-list" aria-label="设置项目">${rows}</nav>${logoutHTML()}${config.version ? `<p class="meta app-version">当前版本 v${esc(config.version)}</p>` : ""}`;
+  wireGo(main);
   wireSpaceSelector();
   wireLogout();
-  // The four writes use the same space revision, even across different forms.
-  let configWrite = Promise.resolve();
-  const writeConfig = (write) => {
-    const request = configWrite.then(async () => {
-      const latest = await write();
+}
+
+function settingContent(page, config) {
+  switch (page) {
+    case "set-together":
+      return `<p class="muted">填写后，概览会显示“已经相伴 N 天”，相识那天算第 1 天。可以不填。</p>
+      <form id="together-form" class="together">
+      <div class="together-row">${dateField("相识日", "acquaintance_date", config.acquaintance_date || "", "选择日期")}<button type="button" class="quiet" id="clear-date" ${config.acquaintance_date ? "" : "hidden"}>清除</button></div>${saveStatusHTML()}</form>`;
+    case "set-people":
+      return `<p class="muted">整理和搜索记忆时，靠这些名字认出谁是谁。搜索会用新名字识别人，已有正文不会自动改写。</p>${participantsForm(config, false)}`;
+    case "set-key":
+      return `<p class="muted">在聊天应用里新增一个 OpenAI 兼容的服务：接口地址填下面这个地址，API Key 填这把钥匙。钥匙只能访问当前空间；重新生成后，所有设备上的旧钥匙立即失效。</p>
+      <div class="mcp-field">
+      <label for="proxy-address">接口地址<input id="proxy-address" type="text" readonly autocomplete="off"></label>
+      <button type="button" id="copy-proxy">复制</button></div>
+      <div id="key-content">
+      <p class="loading">正在读取…</p></div>
+      <button type="button" class="guide-entry connect-entry"><span><strong>接入指南</strong><span class="meta">Kelivo、Operit 一步步怎么设置</span></span><span class="guide-entry-arrow" aria-hidden="true">›</span></button>`;
+    case "set-mcp":
+      return `<p class="muted">让 TA 主动查记忆、记书签。这里使用的就是“访问钥匙”一栏里的同一把钥匙。</p>
+      <div id="mcp-content"></div>`;
+    case "set-persona":
+      return `<p class="muted">写在这里的内容会替换聊天应用里的系统提示词（包括世界书）；不写就用聊天应用自己的。修改从下一轮对话生效。</p>
+      <form id="persona-form">
+      <div class="persona-import">
+      <button type="button" class="quiet" id="import-persona" aria-describedby="persona-formats">从文件导入</button><span class="muted" id="persona-formats">支持 .txt、.md、.docx</span>
+      <input type="file" id="persona-file" hidden></div>
+      <p class="hint" id="persona-active" ${(config.persona || "").trim() ? "" : "hidden"}>现在聊天应用里的系统提示词、角色卡和世界书都不会生效。想用聊天应用自己的，把这里清空就行。</p>
+      <label for="persona-text"><textarea id="persona-text" aria-label="人设（系统提示词）" name="persona" rows="7" maxlength="100000" placeholder="注意：这里填了就会替换聊天应用里的系统提示词（包括角色卡、世界书），两边都填的话以这里为准；不填就用聊天应用自己的。">${esc(config.persona || "")}</textarea></label>
+      <p class="error" id="persona-import-error" role="alert"></p>${saveStatusHTML()}</form>`;
+    case "set-import":
+      return `<p class="muted">把以前的聊天记录或你自己整理的记忆搬过来，整理成卡片。不导入也可以，从零开始。</p>
+      <button type="button" class="primary" data-go="imports">去导入</button>`;
+    case "set-review":
+      return `<form id="auto-approval-form">
+      <label class="check" for="auto-approval">
+      <input id="auto-approval" type="checkbox" name="auto_approve_enabled" ${config.auto_approve_enabled ? "checked" : ""}>未审核的卡片 ${config.auto_approve_delay_hours} 小时后自动入库</label>
+      <p class="muted">达到等待时间后，在之后的每日整理中收录；修改并保存草稿会重新计时。关闭后仅手动收录。</p>${saveStatusHTML()}</form>`;
+    case "set-bookmarks":
+      return `<form id="period-notes-form">
+      <label class="check" for="period-notes">
+      <input id="period-notes" type="checkbox" name="period_notes_enabled" ${config.period_notes_enabled ? "checked" : ""}>记录月经周期</label>
+      <p class="muted">关闭后，记忆书签不再显示这个分区，TA 也不会再往里记；已记下的内容会保留。</p>${saveStatusHTML()}</form>`;
+  }
+}
+
+async function settingPage(main, page, epoch, read) {
+  const config = configurationViews.includes(page) ? await read(url("/configuration")) : null;
+  if (epoch !== state.epoch) return;
+  main.innerHTML = `<section class="settings-section" id="${page}" aria-labelledby="page-title">${settingContent(page, config)}</section>`;
+
+  const autosaveSetting = (form, path, key, readValue) => {
+    const save = autoSave($(".autosave-status", form), readValue, async (value) => {
+      const latest = await api(url(path), {
+        method: "PATCH",
+        body: { expected_revision: config.revision, [key]: value },
+      });
       Object.assign(config, latest);
-      return latest;
     });
-    configWrite = request.catch(() => {});
-    return request;
+    wireAutoSave(form, save);
+    form.onsubmit = (event) => event.preventDefault();
+    return save;
   };
-  // Section index: pinned at the top while scrolling; the section in view is underlined.
-  const sectionIndex = $(".settings-index", main);
-  const jumps = $$("[data-jump]", main);
-  const jumpTargets = jumps.map((button) => $("#" + button.dataset.jump));
-  jumps.forEach(
-    (button) =>
-      (button.onclick = () =>
-        $("#" + button.dataset.jump).scrollIntoView({ behavior: "smooth" })),
-  );
-  let currentJump = -1;
-  let jumpFrame = 0;
-  const markCurrentSection = () => {
-    if (!sectionIndex.isConnected) {
-      window.removeEventListener("scroll", onSettingsScroll);
-      return;
+
+  switch (page) {
+    case "set-together": {
+      const form = $("#together-form", main);
+      const date = form.elements.acquaintance_date;
+      const clear = $("#clear-date", form);
+      wireDates(form);
+      const save = autosaveSetting(form, "/configuration", "acquaintance_date", () => date.value || null);
+      const updateClear = () => { clear.hidden = !date.value; };
+      date.addEventListener("input", updateClear);
+      date.addEventListener("change", updateClear);
+      clear.onclick = () => {
+        date.value = "";
+        date.dispatchEvent(new Event("input"));
+        save.changed(true);
+      };
+      break;
     }
-    // A section counts as current once its heading is in the upper quarter of the screen.
-    const line = sectionIndex.getBoundingClientRect().bottom + window.innerHeight * 0.25;
-    let active = 0;
-    jumpTargets.forEach((section, i) => {
-      if (section.getBoundingClientRect().top <= line) active = i;
-    });
-    // The last sections are short and may never reach the top; the page end selects the last.
-    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) active = jumps.length - 1;
-    if (active === currentJump) return;
-    currentJump = active;
-    jumps.forEach((button, i) => button.setAttribute("aria-current", String(i === active)));
-    const button = jumps[active];
-    sectionIndex.scrollTo({ left: button.offsetLeft - (sectionIndex.clientWidth - button.offsetWidth) / 2, behavior: "smooth" });
-  };
-  const onSettingsScroll = () => {
-    if (!jumpFrame) jumpFrame = requestAnimationFrame(() => { jumpFrame = 0; markCurrentSection(); });
-  };
-  window.addEventListener("scroll", onSettingsScroll, { passive: true });
-  markCurrentSection();
-  wireGo($("#set-import", main));
-  $(".guide-entry:not(.connect-entry)", main).onclick = openGuide;
-  $(".connect-entry", main).onclick = openConnectGuide;
-  // The chat proxy lives next to /mcp on the same origin.
+    case "set-people":
+      wireParticipants($("#participants-form", main), config, false);
+      break;
+    case "set-key":
+      $(".connect-entry", main).onclick = openConnectGuide;
+      wireProxyAddress(main);
+      void accessKeySection(epoch);
+      break;
+    case "set-mcp":
+      void mcpConnectionPage($("#mcp-content", main), epoch);
+      break;
+    case "set-persona": {
+      const form = $("#persona-form", main);
+      const textarea = form.elements.persona;
+      autosaveSetting(form, "/persona", "persona", () => textarea.value);
+      textarea.addEventListener("input", () => {
+        $("#persona-active", main).hidden = !textarea.value.trim();
+      });
+      wirePersonaImport(form);
+      break;
+    }
+    case "set-import":
+      wireGo(main);
+      break;
+    case "set-review": {
+      const form = $("#auto-approval-form", main);
+      autosaveSetting(form, "/auto-approval", "auto_approve_enabled", () => form.elements.auto_approve_enabled.checked);
+      break;
+    }
+    case "set-bookmarks": {
+      const form = $("#period-notes-form", main);
+      autosaveSetting(form, "/period-notes", "period_notes_enabled", () => form.elements.period_notes_enabled.checked);
+      break;
+    }
+  }
+}
+
+function wireProxyAddress(main) {
   const proxyAddress = $("#proxy-address", main);
   proxyAddress.value = (state.mcpUrl || "").replace(/\/mcp\/?$/, "/v1");
   $("#copy-proxy", main).onclick = async () => {
@@ -2037,43 +2098,60 @@ async function settingsPage(main, initialize, epoch, section, read) {
       proxyAddress.select();
     }
   };
-  if (section) $("#" + section, main)?.scrollIntoView();
-  const autosaveSetting = (form, path, key, read) => {
-    const save = autoSave($(".autosave-status", form), read, (value) =>
-      writeConfig(() => api(url(path), {
-        method: "PATCH",
-        body: { expected_revision: config.revision, [key]: value },
-      })),
-    );
-    wireAutoSave(form, save);
-    form.onsubmit = (event) => event.preventDefault();
-    return save;
-  };
-  const together = $("#together-form");
-  const date = together.elements.acquaintance_date;
-  const clearDate = $("#clear-date");
-  wireDates(together);
-  const saveDate = autosaveSetting(together, "/configuration", "acquaintance_date", () => date.value || null);
-  const updateClear = () => { clearDate.hidden = !date.value; };
-  date.addEventListener("input", updateClear);
-  date.addEventListener("change", updateClear);
-  clearDate.onclick = () => {
-    date.value = "";
-    date.dispatchEvent(new Event("input"));
-    saveDate.changed(true);
-  };
-  const persona = $("#persona-form");
-  autosaveSetting(persona, "/persona", "persona", () => persona.elements.persona.value);
-  persona.elements.persona.addEventListener("input", () => {
-    $("#persona-active", main).hidden = !persona.elements.persona.value.trim();
+}
+
+function manualPage(main) {
+  const chapters = MANUAL.split(/^## /m).slice(1).map((chapter) => {
+    const end = chapter.indexOf("\n");
+    return {heading: chapter.slice(0, end), body: chapter.slice(end + 1)};
   });
-  wirePersonaImport(persona);
-  const autoApproval = $("#auto-approval-form");
-  autosaveSetting(autoApproval, "/auto-approval", "auto_approve_enabled", () => autoApproval.elements.auto_approve_enabled.checked);
-  const periodNotes = $("#period-notes-form");
-  autosaveSetting(periodNotes, "/period-notes", "period_notes_enabled", () => periodNotes.elements.period_notes_enabled.checked);
-  wireParticipants($("#participants-form"), config, false, writeConfig);
-  void accessKeySection(epoch);
+  main.innerHTML = `<div class="manual-layout"><div class="manual-nav-frame"><nav class="manual-nav" aria-label="使用说明板块">${chapters.map(({heading}) => `<button type="button" aria-controls="manual-content">${esc(heading)}</button>`).join("")}</nav></div><article class="manual-content" id="manual-content" aria-labelledby="manual-heading"></article></div>`;
+  const frame = $(".manual-nav-frame", main);
+  const nav = $(".manual-nav", frame);
+  const buttons = $$("button", nav);
+  const content = $("#manual-content", main);
+  const mobile = matchMedia("(max-width: 700px)");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  const updateEdges = () => {
+    frame.classList.toggle("has-more-left", nav.scrollLeft > 1);
+    frame.classList.toggle("has-more-right", nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1);
+  };
+  const resize = new ResizeObserver(() => {
+    if (nav.isConnected) updateEdges();
+    else resize.disconnect();
+  });
+  resize.observe(nav);
+  nav.addEventListener("scroll", updateEdges, {passive: true});
+  updateEdges();
+
+  const show = (index) => {
+    buttons.forEach((button, item) => {
+      if (item === index) button.setAttribute("aria-current", "true");
+      else button.removeAttribute("aria-current");
+    });
+    const {heading, body} = chapters[index];
+    const next = chapters[index + 1];
+    content.innerHTML = `<h2 id="manual-heading" tabindex="-1">${esc(heading)}</h2>${notesHTML(body)}${next ? `<button type="button" class="manual-next" aria-controls="manual-content">下一篇：${esc(next.heading)} →</button>` : ""}`;
+    if (next) $(".manual-next", content).onclick = () => {
+      go(index + 1);
+      $("#manual-heading", content).focus({preventScroll: true});
+    };
+  };
+  const go = (index) => {
+    show(index);
+    window.scrollTo(0, 0);
+    if (mobile.matches) {
+      const button = buttons[index].getBoundingClientRect();
+      const offset = button.left - nav.getBoundingClientRect().left;
+      const left = nav.scrollLeft + offset - (nav.clientWidth - button.width) / 2;
+      nav.scrollTo({left, behavior: reduceMotion.matches ? "auto" : "smooth"});
+    }
+  };
+  buttons.forEach((button, index) => button.onclick = () => {
+    go(index);
+    if (!mobile.matches) button.scrollIntoView({block: "nearest", inline: "nearest"});
+  });
+  show(0);
 }
 
 function wirePersonaImport(form) {
@@ -2106,11 +2184,9 @@ async function accessKeySection(epoch) {
   const target = $("#key-content");
   if (!target) return;
   async function load() {
-    renderMcpConnection("");
     try {
       const data = await api(url("/access-key"), {notifyAuth: () => epoch === state.epoch});
       if (epoch !== state.epoch || !target.isConnected) return;
-      renderMcpConnection(data.key || "");
       if (!data.configured) {
         target.innerHTML = '<p class="muted">管理员需要先在服务器配置访问钥匙主密钥。</p>';
         return;
@@ -2163,9 +2239,20 @@ async function accessKeySection(epoch) {
   await load();
 }
 
-function renderMcpConnection(key) {
-  const target = $("#mcp-content");
-  if (!target) return;
+async function mcpConnectionPage(target, epoch) {
+  renderMcpConnection(target, "");
+  try {
+    const data = await api(url("/access-key"), {notifyAuth: () => epoch === state.epoch});
+    if (epoch === state.epoch && target.isConnected) renderMcpConnection(target, data.key || "");
+  } catch (error) {
+    if (epoch !== state.epoch || !target.isConnected) return;
+    errorAt($(".error", target), error);
+    target.insertAdjacentHTML("beforeend", '<button type="button" class="quiet mcp-retry">重新读取钥匙</button>');
+    $(".mcp-retry", target).onclick = () => mcpConnectionPage(target, epoch);
+  }
+}
+
+function renderMcpConnection(target, key) {
   const fields = [
     ["mcp-address", "服务器地址", state.mcpUrl, false],
     ["mcp-transport", "传输方式", "Streamable HTTP", false],
@@ -2418,7 +2505,7 @@ async function memoryCardsPage(main, epoch, view, read, fresh) {
           .join("") ||
         (overview.cards
           ? '<p class="empty">没有找到卡片，试试调整关键词或筛选条件。</p>'
-          : '<p class="empty">还没有记忆。以前的聊天记录或整理好的记忆，可以<a href="#" data-go="settings" data-section="set-import">去设置里导入</a>。</p>');
+          : `<p class="empty">还没有记忆。以前的聊天记录或整理好的记忆，可以<a href="${pageURL("set-import")}" data-go="set-import">去设置里导入</a>。</p>`);
       if (!overview.cards) wireGo(target);
       if (data.total > data.size) {
         target.insertAdjacentHTML("beforeend", pager(data));
@@ -2641,7 +2728,8 @@ async function start() {
     state.space =
       state.spaces.find((s) => s.id === saved)?.id || state.spaces[0]?.id || "";
     const page = pageFromPath();
-    if (pagePath() !== "/" + page) history.replaceState({}, "", pageURL(page));
+    const currentURL = location.pathname + (pagePath() === "/settings" ? location.search : "");
+    if (currentURL !== pageURL(page)) history.replaceState({}, "", pageURL(page));
     await navigate(page, false);
   } catch (error) {
     if (error.status === 401) {

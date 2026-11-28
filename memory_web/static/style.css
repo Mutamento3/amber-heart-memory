@@ -201,10 +201,11 @@ label.milestone { font-size: 11px; gap: 6px; line-height: 1.6; }
 .date-control input { appearance: none; -webkit-appearance: none; box-sizing: border-box; display: block; width: 100%; inline-size: 100%; min-width: 0; min-inline-size: 0; min-height: 46px; }
 .date-control input::-webkit-date-and-time-value { min-height: 1.5em; text-align: left; }
 /* Settings sections keep compact controls without nested cards. */
-.settings-index { display: flex; gap: 6px; margin-bottom: 16px; overflow-x: auto; }
-.settings-index button { flex-shrink: 0; white-space: nowrap; background: transparent; border-color: transparent; font-size: 13px; color: var(--focus); padding: 8px; }
+.settings-list { border-block: 1px solid var(--line); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 6px 10px; font-size: 14px; }
+.setting-row + .setting-row { border-top: 1px solid var(--line); }
+.setting-row > span:last-child { color: var(--muted); font-size: 20px; line-height: 1; }
 .settings-section, .memo-card { padding: 24px; margin-bottom: 16px; }
-.settings-section { scroll-margin-top: 16px; }
 .settings-section > h2 { font-size: 16px; font-weight: 500; }
 .settings-section > .muted { margin: 5px 0 20px; max-width: 620px; line-height: 1.75; }
 .settings-section form { display: grid; gap: 16px; }
@@ -230,7 +231,8 @@ dialog p { margin-top: 12px; }
 .settings-session { display: flex; justify-content: end; padding: 2px 0; }
 #logout { font-size: 12px; min-height: 36px; gap: 6px; }
 #logout .icon { width: 16px; height: 16px; }
-.space-settings select { width: 100%; max-width: 320px; }
+.space-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 10px 12px; font-size: 14px; color: var(--ink); }
+.space-settings select { width: min(55%, 220px); min-height: 36px; margin: 0; }
 .review-stack { max-width: 760px; }
 .review-card-slot + .review-card-slot { margin-top: 16px; }
 .import-original { margin: 12px 0; font-size: 12px; }
@@ -561,19 +563,6 @@ button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding:
 /* Acquaintance date: the field and its buttons share one compact height. */
 .together-row .date-control input { min-height: 34px; height: 34px; padding: 4px 10px; border-radius: 4px; line-height: 1.5; }
 .together-row > button { min-height: 34px; height: 34px; padding: 0 12px; border-radius: 4px; font-size: 12px; line-height: 1; }
-/* Settings section index: sticky, no visible scrollbar, underline on the section in view. */
-.settings-index { position: sticky; top: 0; z-index: 4; gap: 4px; background: var(--paper); border-bottom: 1px solid var(--line); scrollbar-width: none; }
-.settings-index::-webkit-scrollbar { display: none; }
-.settings-index button { color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 8px 8px; min-height: 0; }
-.settings-index button[aria-current="true"] { color: var(--pink); border-bottom-color: var(--pink); }
-@media (hover: hover) {
-  .settings-index button:not(:disabled):hover { background: transparent; border-color: transparent; color: var(--pink); }
-  .settings-index button[aria-current="true"]:not(:disabled):hover { border-bottom-color: var(--pink); }
-}
-.settings-section { scroll-margin-top: 64px; }
-@media (max-width: 700px) {
-  .settings-index { margin-inline: -16px; padding-inline: 12px; }
-}
 /* Buttons that sit beside a boxed field share its compact height. */
 .mcp-field > button, .key-actions button { min-height: 34px; height: 34px; padding: 0 12px; font-size: 12px; line-height: 1; }
 /* Access key: [key field][copy] on one row, then small text actions. Layout only, markup unchanged. */
@@ -639,7 +628,7 @@ button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding:
 .today-status summary::after { content: " ›"; }
 .today-status[open] summary::after { content: " ⌄"; }
 .today-status p { margin: 6px 0 0; font-size: 12px; line-height: 1.7; }
-/* Back to the overview: a chevron beside the page title (sub-pages of the overview). */
+/* Back to the parent page from an overview or settings subpage. */
 .heading-row:has(.back-arrow) { justify-content: flex-start; gap: 4px; }
 .back-arrow { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 36px; margin-left: -8px; font-size: 30px; line-height: 1; color: var(--muted); }
 /* Instant summaries: time range, then the text. */
@@ -660,7 +649,38 @@ button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding:
 .summary-day[open] > summary::after { transform: rotate(90deg); }
 .summary-day > .summary-entry + .summary-entry { margin-top: 10px; }
 .summary-retention { margin: 14px 2px 0; font-size: 11px; }
-.app-version { margin: 6px 2px 0; }
+.app-version { margin: 6px 2px 0; text-align: center; }
+.manual-layout { --manual-accent: #984f58; display: grid; gap: 16px; }
+.manual-nav-frame { display: contents; }
+.manual-nav { display: flex; align-items: center; overflow-x: auto; max-width: 100%; min-width: 0; border-bottom: 1px solid var(--line); }
+.manual-nav button { flex: 0 0 auto; padding: 8px 12px; min-height: 42px; white-space: nowrap; font-size: 13px; color: var(--ink); background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; }
+@media (hover: hover) {
+  .manual-nav button:not(:disabled):hover { background: transparent; color: var(--manual-accent); border-color: transparent; }
+  .manual-next:not(:disabled):hover { background: transparent; color: var(--manual-accent); text-decoration: underline; text-underline-offset: 3px; }
+}
+.manual-nav button[aria-current="true"],
+.manual-nav button[aria-current="true"]:not(:disabled):hover { color: var(--manual-accent); border-color: var(--pink); }
+.manual-nav button:focus-visible { outline-offset: -3px; }
+.manual-content { min-width: 0; max-width: 700px; line-height: 1.9; }
+.manual-content h2 { font-size: 18px; margin-bottom: 12px; }
+.manual-content p, .manual-content ul { margin: 0 0 12px; }
+.manual-content ul { padding-left: 1.4em; }
+.manual-content li + li { margin-top: 6px; }
+.manual-content p:has(> strong:only-child) { margin-bottom: 4px; }
+.manual-next { min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--manual-accent); font-size: 13px; }
+@media (min-width: 701px) {
+  .manual-layout { grid-template-columns: 136px minmax(0, 1fr); align-items: start; gap: 28px; }
+  .manual-nav { position: sticky; top: 16px; flex-direction: column; align-items: stretch; border-bottom: 0; border-right: 1px solid var(--line); }
+  .manual-nav button { border: 0; border-right: 2px solid transparent; text-align: left; }
+}
+@media (max-width: 700px) {
+  .manual-nav-frame { display: block; min-width: 0; position: sticky; top: var(--safe-top); z-index: 4; background: var(--paper); }
+  .manual-nav { scrollbar-width: none; }
+  .manual-nav::-webkit-scrollbar { display: none; }
+  .manual-nav-frame::before, .manual-nav-frame::after { position: absolute; z-index: 1; top: 0; bottom: 1px; width: 40px; pointer-events: none; }
+  .manual-nav-frame.has-more-left::before { content: ""; left: 0; background: linear-gradient(to right, var(--paper), transparent); }
+  .manual-nav-frame.has-more-right::after { content: ""; right: 0; background: linear-gradient(to left, var(--paper), transparent); }
+}
 .update-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--ink); }
 .update-dot { width: 8px; height: 8px; border-radius: 50%; background: #e0484d; }
 .popup { max-width: 420px; padding: 22px 24px 18px; max-height: calc(100dvh - 48px); overflow-y: auto; }
@@ -668,15 +688,9 @@ button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding:
 .popup-top { display: flex; align-items: center; justify-content: space-between; min-height: 34px; }
 .popup-top .eyebrow { margin: 0; }
 .popup-skip { color: var(--muted); }
-.guide-page { min-height: 300px; }
-.guide-what { margin: 0 0 18px; line-height: 1.75; }
 .guide-fact { margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; background: var(--rose); }
 .guide-fact span { display: block; font-size: 12px; color: var(--pink); letter-spacing: .5px; }
 .guide-fact p { margin: 4px 0 0; line-height: 1.7; }
-.guide-note { margin: 6px 0 0; line-height: 1.6; }
-.guide-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
-.guide-prev, .guide-next { font-size: 20px; min-width: 44px; min-height: 40px; }
-.guide-prev:disabled { opacity: .3; cursor: default; }
 .update-notes { margin: 0 0 16px; line-height: 1.75; }
 .update-notes p { margin: 0 0 8px; }
 .update-notes ul { margin: 0 0 8px; padding-left: 20px; }

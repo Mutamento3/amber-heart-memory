@@ -172,7 +172,7 @@ const title = (page) =>
     overview: "概览",
     review: "待审核",
     memories: "记忆",
-    conversations: "召回",
+    conversations: "记录",
     imports: "导入",
     settings: "设置",
   })[page];
@@ -550,7 +550,7 @@ const PAGE_INFO = {
   review: ["记忆审核", "A LITTLE SPACE FOR MEMORIES"],
   memories: ["记忆", "COLLECTION"],
   imports: ["导入", "BRING YOUR MEMORIES"],
-  conversations: ["聊天与召回", "CONVERSATIONS"],
+  conversations: ["聊天记录", "CHAT HISTORY"],
   diaries: ["日记", "DIARY"],
   summaries: ["及时摘要", "SUMMARIES"],
   "core-memory": ["核心记忆", "CORE MEMORY"],
@@ -817,7 +817,7 @@ async function overviewPage(main, epoch, read, fresh) {
   }
   const recall = data.recall_counts;
   if (recall && (recall.failed || recall.timed_out || recall.degraded)) {
-    $(".today-status", main).insertAdjacentHTML("beforebegin", `<p class="recall-overview today-alert">记忆召回记录：${recall.timed_out} 轮超时 · ${recall.failed} 轮失败 · ${recall.degraded} 轮降级。<a href="${pageURL("conversations")}" data-go="conversations">查看聊天与召回</a></p>`);
+    $(".today-status", main).insertAdjacentHTML("beforebegin", `<p class="recall-overview today-alert">记忆召回记录：${recall.timed_out} 轮超时 · ${recall.failed} 轮失败 · ${recall.degraded} 轮降级。<a href="${pageURL("conversations")}" data-go="conversations">查看聊天记录</a></p>`);
   }
   // CSP forbids inline style attributes; CSSOM assignments are allowed.
   $$(".barrow", main).forEach((row) => {
@@ -879,7 +879,7 @@ const GUIDE_ROWS = [
   ["及时摘要", "当天聊得多了，把早些时候的聊天浓缩成摘要，聊得再久前面的事也不会忘。", "系统自动写，当天聊到一定长度就写一份。", "每轮都带当天的摘要。"],
   ["记忆卡片", "一件件具体的经历，长期保存。", "每天凌晨从前一天的聊天里抽出来，先进待审核，审过或到时间自动收录后入库。", "每轮自动召回和这轮聊天最相关的 5 张，不是全部都带。"],
 ];
-const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p><p class="meta guide-note">最近的聊天原文也每轮都带，开新对话不会清空。想让 TA 忘掉某几轮，到“召回”页删除。</p>';
+const GUIDE_INTRO = '<h2>TA 的记忆分五种</h2><div class="guide-fact"><span>每轮都带</span><p>核心记忆 · 记忆书签 · 日记 · 及时摘要</p></div><div class="guide-fact"><span>每轮召回最相关的 5 张</span><p>记忆卡片</p></div><p class="meta guide-note">设置里的人设写的是 TA 自己，也是每轮都带。</p><p class="meta guide-note">最近的聊天原文也每轮都带，开新对话不会清空。想让 TA 忘掉某几轮，到“记录”页删除。</p>';
 function stored(key) {
   try { return localStorage.getItem(key); } catch { return "unavailable"; }
 }
@@ -1005,12 +1005,12 @@ function connectNotes(app) {
 <li>${name} 里只填琥珀之心的访问钥匙。模型的 API Key 只在安装琥珀之心时填，不要直接填进 ${name}，否则聊天会绕过琥珀之心，既记不下来，也召回不了记忆。</li>
 <li>${own}都要关掉，记忆交给琥珀之心。</li>
 <li>琥珀之心填了人设，会替换 ${name} 里的${prompts}。</li>
-<li>在 ${name} 里开新对话，琥珀之心记下的聊天不会清空，TA 仍记得最近聊过的内容。想让 TA 忘掉某几轮，到“召回”页点右上角的“删除”，勾选后删掉。</li></ul>
+<li>在 ${name} 里开新对话，琥珀之心记下的聊天不会清空，TA 仍记得最近聊过的内容。想让 TA 忘掉某几轮，到“记录”页点右上角的“删除”，勾选后删掉。</li></ul>
 <h3>连不上怎么办</h3><ul>
 <li>提示 401：访问钥匙没复制全，或者已经作废，回这里重新复制。</li>
 <li>提示 404：接口地址填错了，照上面复制的地址重新填。</li>
 <li>拉不到模型：先用浏览器打开琥珀之心的地址，看能不能出现登录页。</li>
-<li>能聊天，但“召回”页没有记录：这个对话用的多半不是琥珀之心下面的模型。</li></ul>`;
+<li>能聊天，但“记录”页没有记录：这个对话用的多半不是琥珀之心下面的模型。</li></ul>`;
 }
 async function openConnectGuide() {
   if ($("#connect-dialog")) return;
@@ -1651,14 +1651,32 @@ async function conversationsPage(main, epoch, read, keepView) {
   const recallStatus = {ok: "召回完成", empty: "未召回卡片", failed: "召回失败，本轮未注入记忆", timeout: "召回超时，本轮未注入记忆", degraded: "召回已降级", skipped_image: "纯图片消息，跳过召回", expired: "原文已删除", not_run: "未记录召回"};
   const toggle = $(".conversation-delete-toggle");
   toggle.hidden = true;
+  function summaryHTML(progress, attemptId = null) {
+    if (!progress) return "";
+    const count = `摘要：${esc(progress.cycle_count)}/${esc(progress.trigger_count)} 条`;
+    const states = {
+      generating: '<span class="conversation-summary-generating">生成中</span>',
+      success: '<span class="conversation-summary-success" role="img" aria-label="摘要已生成">✓</span>',
+      failed: attemptId ? `<button type="button" class="conversation-summary-failed" data-summary-retry="${esc(attemptId)}" title="摘要生成失败，点击重试" aria-label="重试生成及时摘要">!</button>` : "",
+    };
+    const indicator = progress.status === "success" || attemptId ? states[progress.status] : "";
+    return `${count} ${indicator || ""}`;
+  }
   function turnHTML(turn) {
+    const assistant = turn.messages.filter(m =>
+      m.role === "assistant" && (m.display_text ?? bodyText(m.content_parts)).trim()
+    ).pop();
     const events = turn.messages.map((m, index) => {
       const ai = m.role === "assistant";
       const body = turn.content_deleted_at ? "原文已删除" : (m.display_text ?? bodyText(m.content_parts));
       const recall = ai && turn.recall_count > 0
         ? `<details class="conversation-recall" data-turn="${turn.id}" data-request="${m.request_id}"><summary>本轮召回 ${turn.recall_count} 张记忆</summary><div class="recall-detail"></div></details>`
         : "";
-      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span><time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time>${m.content_state === "incomplete" ? '<span class="conversation-state">未完成</span>' : ""}</div><p class="conversation-body">${esc(body)}</p>${recall}</section>`;
+      const progress = turn.summary_progress;
+      const summary = m === assistant
+        ? `<div class="conversation-summary" aria-live="polite"${progress ? "" : " hidden"}>${summaryHTML(progress)}</div>`
+        : "";
+      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span><time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time>${m.content_state === "incomplete" ? '<span class="conversation-state">未完成</span>' : ""}</div><p class="conversation-body">${esc(body)}</p>${recall}${summary}</section>`;
       return {index: m.event_index ?? index, html};
     });
     for (const tool of turn.tool_calls || []) {
@@ -1667,7 +1685,7 @@ async function conversationsPage(main, epoch, read, keepView) {
     events.sort((a, b) => a.index - b.index);
     const active = ["pending", "generating"].includes(turn.generation_state);
     const select = `<button type="button" class="conversation-select" data-position="${turn.position_id}" aria-label="选择聊天轮次 ${turn.position_id}" aria-pressed="false"${active ? " disabled" : ""}></button>`;
-    return `<article class="conversation-turn" data-turn="${turn.id}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
+    return `<article class="conversation-turn" data-turn="${turn.id}" data-business-day="${esc(turn.business_date)}" data-summarized="${Boolean(turn.summarized)}">${select}${turn.history_omitted?.turns ? `<p class="conversation-state history-omitted">本轮省略了较早的 ${turn.history_omitted.turns} 轮原话（${turn.history_omitted.messages} 条），已告诉 TA。</p>` : ""}${events.map(event => event.html).join("")}${status[turn.generation_state] ? `<p class="conversation-state">${status[turn.generation_state]}</p>` : ""}</article>`;
   }
   function daysHTML(items) {
     const days = new Map();
@@ -1709,6 +1727,89 @@ async function conversationsPage(main, epoch, read, keepView) {
   // Like a chat window: open at the newest turn, load older turns when the reader scrolls up.
   main.innerHTML = `<p class="conversation-more meta" role="status"></p><div class="conversation-list">${daysHTML(data.items)}</div><div class="conversation-delete-bar" role="group" aria-label="所选聊天轮次" hidden><button type="button" class="danger conversation-delete-confirm" disabled>删除 0 轮</button><button type="button" class="quiet conversation-delete-cancel">取消</button></div>`;
   const list = $(".conversation-list", main), more = $(".conversation-more", main);
+  function updateSummaryBoundaries() {
+    $$(".conversation-summary-boundary", list).forEach(marker => marker.remove());
+    let previous;
+    for (const turn of $$(".conversation-turn", list)) {
+      if (previous?.dataset.businessDay === turn.dataset.businessDay
+          && previous.dataset.summarized === "true" && turn.dataset.summarized === "false") {
+        turn.insertAdjacentHTML("beforebegin", '<p class="conversation-summary-boundary">以上已压成摘要</p>');
+      }
+      previous = turn;
+    }
+  }
+  let summaryState, summaryPoll, displayedAttempt, queuedRetryUntil = 0;
+  const currentPage = () => epoch === state.epoch && list.isConnected;
+  function renderSummaryState({keepBottom = false} = {}) {
+    const atBottom = keepBottom && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+    const attempt = summaryState?.attempt;
+    const field = turnId => $(`.conversation-turn[data-turn="${turnId}"] .conversation-summary`, list);
+    if (displayedAttempt?.turn_id && displayedAttempt.turn_id !== attempt?.turn_id) {
+      const previousField = field(displayedAttempt.turn_id);
+      if (previousField?.querySelector("[data-summary-retry], .conversation-summary-generating")) {
+        previousField.innerHTML = summaryHTML({...displayedAttempt, status: null});
+      }
+    }
+    displayedAttempt = attempt;
+    const target = attempt && field(attempt.turn_id);
+    if (target) {
+      const html = summaryHTML({...attempt, status: summaryState.status}, attempt.id);
+      if (target.innerHTML !== html) target.innerHTML = html;
+      target.hidden = false;
+    }
+    if (attempt && summaryState.status === "success") {
+      const covered = new Set(summaryState.covered_turn_ids.map(String));
+      for (const turn of $$(".conversation-turn", list)) {
+        if (turn.dataset.businessDay === attempt.business_date) {
+          turn.dataset.summarized = String(covered.has(turn.dataset.turn));
+        }
+      }
+    }
+    updateSummaryBoundaries();
+    if (atBottom) window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+  async function refreshSummaryStatus() {
+    if (!currentPage()) return;
+    try {
+      const received = await api(url("/summaries/status"), {notifyAuth: currentPage});
+      const retryStillQueued = Date.now() < queuedRetryUntil && received.status === "failed"
+        && received.attempt?.id === summaryState?.attempt?.id;
+      if (!retryStillQueued) {
+        queuedRetryUntil = 0;
+        summaryState = received;
+        if (currentPage()) renderSummaryState({keepBottom: true});
+      }
+    } catch {
+      // The timeline remains available if the status read fails.
+    }
+    if (currentPage() && summaryState?.status === "generating") {
+      summaryPoll = setTimeout(refreshSummaryStatus, 1500);
+    }
+  }
+  list.addEventListener("click", async event => {
+    const button = event.target.closest("[data-summary-retry]");
+    if (!button || button.disabled) return;
+    keepView();
+    button.disabled = true;
+    clearTimeout(summaryPoll);
+    try {
+      summaryState = await api(url("/summaries/retry"), {
+        method: "POST", body: {attempt_id: button.dataset.summaryRetry}, notifyAuth: currentPage,
+      });
+      if (!currentPage()) return;
+      renderSummaryState({keepBottom: true});
+      if (summaryState.status === "generating") {
+        queuedRetryUntil = Date.now() + 6000;
+        summaryPoll = setTimeout(refreshSummaryStatus, 1500);
+      }
+    } catch (error) {
+      if (currentPage()) message(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  renderSummaryState();
+  void refreshSummaryStatus();
   const bar = $(".conversation-delete-bar", main);
   const remove = $(".conversation-delete-confirm", bar);
   const selected = new Set();
@@ -1796,6 +1897,7 @@ async function conversationsPage(main, epoch, read, keepView) {
         last.remove();
       }
       list.prepend(batch.content);
+      renderSummaryState();
       before = older.has_more ? older.next_before : null;
       more.textContent = "";
       observer.unobserve(more);

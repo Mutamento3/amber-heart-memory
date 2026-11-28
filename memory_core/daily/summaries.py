@@ -1,17 +1,18 @@
 """Versioned whole-turn summaries; model calls are deliberately outside this store."""
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from psycopg.types.json import Jsonb
 
 from ..conversations import chat_text as text
-from ..storage.clock import format_timestamp
-from ..conversations.conversation_material import dialogue_input
+from ..storage.clock import business_day_label, format_timestamp
+from ..conversations.conversation_material import UNCOVERED_TURNS, dialogue_input, uncovered_message_count
 from ..conversations.conversation_rounds import fingerprint
-from ..conversations.conversations import ConversationStore
+from ..conversations.conversations import ConversationStore, SUMMARY_RETENTION_DAYS
 from ..storage.db import background_lock, connect
-from ..storage.schema import SUMMARY_VERSION
+from ..storage.schema import SUMMARY_PROGRESS_VERSION, SUMMARY_VERSION
 from ..storage.space import read_policy
 from .summary_policy import SummarySettings, summary_batch
 
@@ -67,15 +68,26 @@ def active_summaries(connection, space, day):
 
 def uncovered_turns(connection, space, day):
     return connection.execute(
-        """SELECT t.* FROM memory_core.conversation_turns t
-        WHERE t.bot_id=%s AND t.business_date=%s AND t.history_state='current' AND t.content_deleted_at IS NULL
-        AND t.generation_state IN ('complete','failed','incomplete') AND NOT EXISTS
-            (SELECT 1 FROM memory_core.conversation_summary_turns st JOIN memory_core.conversation_summaries s
-             ON (s.id,s.bot_id)=(st.summary_id,st.bot_id) WHERE st.bot_id=t.bot_id AND st.turn_id=t.id
-             AND s.content_deleted_at IS NULL)
-        ORDER BY t.position_id""",
+        "SELECT t.* " + UNCOVERED_TURNS + " ORDER BY t.position_id",
         (space, day),
     ).fetchall()
+
+
+def summarized_turn_ids(connection, space, *, ids=None, day=None):
+    if ids is not None:
+        scope = "st.turn_id=ANY(%s)"
+        value = ids
+    else:
+        scope = "st.business_date=%s"
+        value = day
+    return [
+        r["turn_id"] for r in connection.execute(
+            """SELECT st.turn_id FROM memory_core.conversation_summary_turns st
+            JOIN memory_core.conversation_summaries s ON (s.id,s.bot_id)=(st.summary_id,st.bot_id)
+            WHERE st.bot_id=%s AND s.content_deleted_at IS NULL AND """ + scope + " ORDER BY st.turn_id",
+            (space, value),
+        ).fetchall()
+    ]
 
 
 class SummaryStore(ConversationStore):
@@ -85,11 +97,94 @@ class SummaryStore(ConversationStore):
             raise ValueError("及时摘要需要先升级记忆核心到版本 12")
         self.summary_settings = settings or SummarySettings()
 
+    @property
+    def _lock_key(self):
+        return "conversation-summary:" + self.space_id
+
     @contextmanager
     def job_lock(self):
         """Session lock survives short commits but vanishes on worker death."""
-        with background_lock(self.dsn, "conversation-summary:" + self.space_id) as guard:
+        with background_lock(self.dsn, self._lock_key) as guard:
             yield guard is not None
+
+    def _last_attempt(self, c):
+        if self.schema_version < SUMMARY_PROGRESS_VERSION:
+            return None
+        row = c.execute(
+            "SELECT summary_attempt FROM memory_core.conversation_space_state WHERE bot_id=%s",
+            (self.space_id,),
+        ).fetchone()
+        return row["summary_attempt"] if row else None
+
+    def status(self, *, now=None):
+        now = now or datetime.now(timezone.utc)
+        today = business_day_label(now, self.settings)
+        day = today.isoformat()
+        with connect(self.dsn) as c:
+            attempt = self._last_attempt(c)
+            if attempt and attempt["business_date"] < (today - timedelta(days=SUMMARY_RETENTION_DAYS)).isoformat():
+                attempt = None
+            if attempt and attempt["status"] == "generating" and c.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0)) AS free",
+                (self._lock_key,),
+            ).fetchone()["free"]:
+                attempt = dict(attempt, status="failed", error="interrupted")
+            return dict(
+                business_date=day,
+                cycle_count=uncovered_message_count(c, self.space_id, day),
+                trigger_count=self.summary_settings.trigger_messages,
+                status=attempt["status"] if attempt else "idle",
+                attempt=attempt,
+                covered_turn_ids=summarized_turn_ids(c, self.space_id, day=attempt["business_date"])
+                if attempt and attempt["status"] == "success" else [],
+            )
+
+    def start_attempt(self, day, *, turn_id=None, rebuild=False):
+        if self.schema_version < SUMMARY_PROGRESS_VERSION:
+            return None
+        with connect(self.dsn) as c:
+            turn = c.execute(
+                """SELECT t.id,t.summary_progress FROM memory_core.conversation_turns t
+                WHERE t.bot_id=%s AND t.business_date=%s AND t.history_state='current'
+                AND t.content_deleted_at IS NULL AND EXISTS (
+                    SELECT 1 FROM memory_core.conversation_messages m
+                    WHERE m.bot_id=t.bot_id AND m.turn_id=t.id AND m.role='assistant'
+                    AND m.content_parts IS NOT NULL)
+                ORDER BY (t.id=%s) DESC NULLS LAST,t.position_id DESC LIMIT 1""",
+                (self.space_id, day, turn_id),
+            ).fetchone()
+            progress = (turn["summary_progress"] if turn else None) or dict(
+                cycle_count=uncovered_message_count(c, self.space_id, day),
+                trigger_count=self.summary_settings.trigger_messages,
+            )
+            attempt = dict(
+                id=uuid4().hex, business_date=day, turn_id=turn["id"] if turn else None,
+                rebuild=rebuild, cycle_count=progress["cycle_count"],
+                trigger_count=progress["trigger_count"], status="generating",
+                error=None, updated_at=format_timestamp(datetime.now(timezone.utc), self.settings),
+            )
+            self._save_attempt(c, attempt)
+            return attempt
+
+    def _save_attempt(self, c, attempt):
+        c.execute(
+            "UPDATE memory_core.conversation_space_state SET summary_attempt=%s WHERE bot_id=%s",
+            (Jsonb(attempt), self.space_id),
+        )
+        progress = {key: attempt[key] for key in ("cycle_count", "trigger_count", "status")}
+        c.execute(
+            """UPDATE memory_core.conversation_turns SET summary_progress=%s
+            WHERE bot_id=%s AND id=%s AND history_state='current' AND content_deleted_at IS NULL""",
+            (Jsonb(progress), self.space_id, attempt["turn_id"]),
+        )
+
+    def finish_attempt(self, attempt, status, *, error=None):
+        if attempt:
+            with connect(self.dsn) as c:
+                self._save_attempt(c, dict(
+                    attempt, status=status, error=error,
+                    updated_at=format_timestamp(datetime.now(timezone.utc), self.settings),
+                ))
 
     def _input(self, connection, turns, policy):
         return dialogue_input(connection, self.space_id, turns, policy, self.settings)

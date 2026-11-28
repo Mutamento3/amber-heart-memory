@@ -129,7 +129,7 @@ class HookTurns(ConversationStore):
             )
         return snapshot
 
-    def complete(self, session, prompt, reply, *, now=None):
+    def complete(self, session, prompt, reply, *, now=None, summary_trigger_count=None):
         now = now or datetime.now(timezone.utc)
         timestamp = format_timestamp(now, self.settings)
         parts = content_parts(reply)
@@ -181,6 +181,11 @@ class HookTurns(ConversationStore):
                     history_changed_at=%s,business_date=%s
                 WHERE bot_id=%s AND id=%s""",
                 (timestamp, timestamp, day, self.space_id, turn_id),
+            )
+            from .conversation_material import save_summary_progress
+
+            save_summary_progress(
+                c, self.space_id, turn_id, day, summary_trigger_count, self.schema_version,
             )
             c.execute(
                 "UPDATE memory_core.conversation_space_state SET history_revision=history_revision+1 WHERE bot_id=%s",

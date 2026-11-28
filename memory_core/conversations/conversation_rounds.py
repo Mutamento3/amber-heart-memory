@@ -534,6 +534,7 @@ class ConversationRounds:
         visible_content=None,
         reported=(),
         reported_none=False,
+        summary_trigger_count=None,
         now=None
     ):
         now = now or datetime.now(timezone.utc)
@@ -657,5 +658,11 @@ class ConversationRounds:
                     ),
                 )
             else:
+                from .conversation_material import save_summary_progress
+
+                save_summary_progress(
+                    c, self.space_id, turn["id"], turn["business_date"],
+                    summary_trigger_count, self.schema_version,
+                )
                 self._release(c, self.space_id)
         return True

@@ -261,9 +261,9 @@ def diary_pages(page, capture):
 
 
 def open_conversation_records(page):
-    page.get_by_role('link', name='召回', exact=True).click()
-    expect(page.locator('.topbar nav [aria-current=page]')).to_have_text('召回')
-    expect(page.get_by_role('heading', name='聊天与召回', exact=True)).to_be_visible()
+    page.get_by_role('link', name='记录', exact=True).click()
+    expect(page.locator('.topbar nav [aria-current=page]')).to_have_text('记录')
+    expect(page.get_by_role('heading', name='聊天记录', exact=True)).to_be_visible()
     expect(page.locator('.page-description')).to_have_count(0)
     expect(page.locator('.conversation-list')).to_be_visible()
     expect(page.locator('#summary-library')).to_have_count(0)
@@ -283,6 +283,12 @@ def conversation_scrollback(page):
                              display_text="合成回复\n" * 3)])
     newest = [turn(p, "2026-11-14" if p <= 13 else "2026-11-15") for p in range(11, 31)]
     older = [turn(p, "2026-11-13" if p <= 7 else "2026-11-14") for p in range(6, 11)]
+    older[-1]["summarized"] = True
+    newest[-2]["summary_progress"] = dict(cycle_count=4, trigger_count=6)
+    newest[-1]["summary_progress"] = dict(cycle_count=6, trigger_count=6, status="failed")
+    attempt = dict(id="a" * 32, turn_id=30, business_date="2026-11-15", cycle_count=6, trigger_count=6)
+    retry_requested = False
+    status_reads_after_retry = 0
     requested = []
 
     def fulfil(route):
@@ -291,12 +297,39 @@ def conversation_scrollback(page):
         items, more = (older, False) if before else (newest, True)
         route.fulfill(json=dict(items=items, total=25, has_more=more, next_before=items[0]["position_id"], size=20))
 
+    def summary_response(status):
+        return dict(status=status, attempt=attempt, covered_turn_ids=[28] if status == "success" else [])
+
+    def read_summary(route):
+        nonlocal status_reads_after_retry
+        if retry_requested:
+            status_reads_after_retry += 1
+        route.fulfill(json=summary_response("success" if status_reads_after_retry > 1 else "failed"))
+
+    def retry_summary(route):
+        nonlocal retry_requested
+        assert route.request.post_data_json == {"attempt_id": attempt["id"]}
+        retry_requested = True
+        route.fulfill(json=summary_response("generating"))
+
     listing = re.compile(r"/api/spaces/sample/conversations(\?.*)?$")
+    status_path = "**/api/spaces/sample/summaries/status"
+    retry_path = "**/api/spaces/sample/summaries/retry"
     page.route(listing, fulfil)
+    page.route(status_path, read_summary)
+    page.route(retry_path, retry_summary)
     page.goto(ORIGIN + "/conversations")
     expect(page.locator(".conversation-turn")).to_have_count(20)
     expect(page.locator(".pagination")).to_have_count(0)
     assert page.evaluate("innerHeight + scrollY >= document.documentElement.scrollHeight - 2")
+    expect(page.locator(".conversation-summary:visible")).to_have_count(2)
+    expect(page.locator('[data-turn="29"] .assistant .conversation-summary')).to_have_text("摘要：4/6 条")
+    progress = page.locator('[data-turn="30"] .assistant .conversation-summary')
+    expect(progress).to_contain_text("摘要：6/6 条")
+    progress.get_by_role("button", name="重试生成及时摘要").click()
+    expect(progress).to_contain_text("生成中")
+    expect(progress.get_by_label("摘要已生成")).to_be_visible()
+    expect(page.locator('.conversation-summary-boundary + [data-turn="29"]')).to_have_count(1)
     top = page.evaluate("() => { scrollTo(0, 0); return document.querySelector('.conversation-turn[data-turn=\"11\"]').getBoundingClientRect().top }")
     expect(page.locator(".conversation-turn")).to_have_count(25)
     after = page.evaluate("document.querySelector('.conversation-turn[data-turn=\"11\"]').getBoundingClientRect().top")
@@ -305,9 +338,12 @@ def conversation_scrollback(page):
     expect(page.locator(".conversation-day > h2")).to_have_count(3)
     expect(page.locator(".conversation-day").nth(0).locator(".conversation-turn")).to_have_count(2)
     expect(page.locator(".conversation-day").nth(1).locator(".conversation-turn")).to_have_count(6)
+    expect(page.locator('.conversation-summary-boundary + [data-turn="11"]')).to_have_count(1)
     expect(page.locator(".conversation-more")).to_have_count(0)
     assert any("before=11" in url for url in requested), requested
     page.unroute(listing, fulfil)
+    page.unroute(status_path)
+    page.unroute(retry_path)
 
 
 def conversation_delete(page):
@@ -364,15 +400,15 @@ def hosted_pages(page, capture):
     recall_link = page.locator('.today .recall-overview a')
     expect(recall_link).to_have_attribute('href', '/conversations')
     recall_link.click()
-    expect(page.get_by_role('heading', name='聊天与召回', exact=True)).to_be_visible()
+    expect(page.get_by_role('heading', name='聊天记录', exact=True)).to_be_visible()
     expect(page.locator('.conversation-list')).to_be_visible()
     page.reload()
-    expect(page.get_by_role('heading', name='聊天与召回', exact=True)).to_be_visible()
+    expect(page.get_by_role('heading', name='聊天记录', exact=True)).to_be_visible()
     expect(page.locator('.conversation-list')).to_be_visible()
     page.goto(ORIGIN + '/memories?tab=conversations')
     expect(page).to_have_url(ORIGIN + '/conversations')
     expect(page.locator('.conversation-list')).to_be_visible()
-    expect(page.locator('.topbar nav [aria-current=page]')).to_have_text('召回')
+    expect(page.locator('.topbar nav [aria-current=page]')).to_have_text('记录')
     expect(page.locator('.page-description')).to_have_count(0)
     expect(page.locator('#summary-library')).to_have_count(0)
     expect(page.locator(".conversation-turn")).to_have_count(8)
@@ -1219,7 +1255,7 @@ def main():
                 nav_links = page.locator(".topbar nav a")
                 assert nav_links.count() == 5
                 assert page.locator(".topbar nav a svg").count() == nav_links.count()
-                expect(nav_links).to_have_text(["概览", "待审核", "记忆", "召回", "设置"])
+                expect(nav_links).to_have_text(["概览", "待审核", "记忆", "记录", "设置"])
 
         page.goto(ORIGIN + "/login")
         layout()

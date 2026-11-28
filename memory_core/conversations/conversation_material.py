@@ -5,7 +5,33 @@ from datetime import date, datetime, timedelta
 from .conversation_history import parts_text, render_turn
 from .conversation_rounds import fingerprint
 from ..storage.clock import business_day_bounds
+from ..storage.schema import SUMMARY_PROGRESS_VERSION
 from ..storage.space import read_policy
+
+
+UNCOVERED_TURNS = """FROM memory_core.conversation_turns t
+    WHERE t.bot_id=%s AND t.business_date=%s AND t.history_state='current' AND t.content_deleted_at IS NULL
+    AND t.generation_state IN ('complete','failed','incomplete') AND NOT EXISTS
+        (SELECT 1 FROM memory_core.conversation_summary_turns st JOIN memory_core.conversation_summaries s
+         ON (s.id,s.bot_id)=(st.summary_id,st.bot_id) WHERE st.bot_id=t.bot_id AND st.turn_id=t.id
+         AND s.content_deleted_at IS NULL)"""
+
+
+def uncovered_message_count(connection, space, day):
+    return connection.execute(
+        "SELECT 2*count(*) AS count " + UNCOVERED_TURNS, (space, day)
+    ).fetchone()["count"]
+
+
+def save_summary_progress(connection, space, turn_id, day, trigger_count, schema_version):
+    if trigger_count is None or schema_version < SUMMARY_PROGRESS_VERSION:
+        return
+    connection.execute(
+        """UPDATE memory_core.conversation_turns SET summary_progress=jsonb_build_object(
+            'cycle_count', %s::bigint, 'trigger_count', %s::integer)
+        WHERE bot_id=%s AND id=%s AND history_state='current' AND content_deleted_at IS NULL""",
+        (uncovered_message_count(connection, space, day), trigger_count, space, turn_id),
+    )
 
 
 def segment_id(identifier):

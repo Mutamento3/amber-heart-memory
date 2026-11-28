@@ -8,12 +8,13 @@ from zoneinfo import ZoneInfo
 from memory_core.storage.clock import business_day_label
 from memory_core.storage.db import connect
 from memory_core.conversations.conversation_history import parts_text
+from memory_core.daily.summaries import summarized_turn_ids
 from memory_core.storage.config import Settings as CoreSettings
 from memory_core.cards.review_policy import ApprovalSettings, MANUAL_REVIEW
 from memory_core.daily.daily_policy import DailySettings
 from memory_core.storage.schema import (DELAYED_APPROVAL_VERSION, ARCHIVE_VERSION, TOPIC_SUMMARY_VERSION,
                                 IMAGE_DESCRIPTION_VERSION, SUMMARY_VERSION, DIARY_VERSION,
-                                RECENT_NOTES_VERSION, CORE_MEMORY_VERSION, IMPORT_VERSION)
+                                RECENT_NOTES_VERSION, CORE_MEMORY_VERSION, IMPORT_VERSION, SUMMARY_PROGRESS_VERSION)
 from memory_core.lifecycle.archive_policy import ArchiveSettings, receipt_health
 from memory_core.cards.drafts import DraftStore, context_for
 from memory_core.imports.imports import direct_import_draft_filter
@@ -401,11 +402,14 @@ class Catalog:
                 "SELECT count(*) AS n FROM memory_core.conversation_turns WHERE bot_id=%s AND history_state='current'",
                 (space,),
             ).fetchone()["n"]
+            version = c.execute("SELECT version FROM memory_core.installation").fetchone()["version"]
+            summary_field = "summary_progress" if version >= SUMMARY_PROGRESS_VERSION else "NULL AS summary_progress"
             turns = c.execute(
                 """SELECT id,position_id,business_date,created_at,generation_state,content_deleted_at,
                 CASE WHEN jsonb_typeof(recall_snapshot->'cards')='array'
                      THEN jsonb_array_length(recall_snapshot->'cards') ELSE 0 END AS recall_count,
-                context_manifest->'summary_ids' AS summary_ids,context_manifest->'history_omitted' AS history_omitted
+                context_manifest->'summary_ids' AS summary_ids,context_manifest->'history_omitted' AS history_omitted,
+                """ + summary_field + """
                 FROM memory_core.conversation_turns
                 WHERE bot_id=%s AND history_state='current' AND content_deleted_at IS NULL
                 AND (%s::bigint IS NULL OR position_id<%s) ORDER BY position_id DESC LIMIT %s""",
@@ -414,7 +418,7 @@ class Catalog:
             has_more = len(turns) > size
             turns = turns[:size]
             ids = [t["id"] for t in turns]
-            version=c.execute('SELECT version FROM memory_core.installation').fetchone()['version']
+            summarized = set(summarized_turn_ids(c, space, ids=ids)) if ids and version >= SUMMARY_VERSION else set()
             image_field='image_descriptions' if version>=IMAGE_DESCRIPTION_VERSION else 'NULL::jsonb AS image_descriptions'
             messages = (
                 c.execute(
@@ -456,6 +460,7 @@ class Catalog:
         for message in messages:
             message["display_text"]=parts_text(message["content_parts"],message.pop("image_descriptions"))
         for turn in turns:
+            turn["summarized"] = turn["id"] in summarized
             turn["messages"] = [m for m in messages if m["turn_id"] == turn["id"]]
             turn["requests"] = [r for r in requests if r["turn_id"] == turn["id"]]
             turn["tool_calls"] = tools_by_turn[turn["id"]]

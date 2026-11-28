@@ -42,6 +42,7 @@ from memory_core.storage.schema import (
     IMAGE_DESCRIPTION_VERSION,
     RECENT_NOTES_VERSION,
     IMPORT_VERSION,
+    SUMMARY_VERSION,
 )
 from memory_core.storage.config import Settings as CoreSettings
 from memory_core.daily.diaries import DiaryConflict, DiaryStore
@@ -150,6 +151,10 @@ class DiaryPatch(Body):
 
 class DeleteConversations(Body):
     position_ids: list[Annotated[StrictInt, Field(gt=0, lt=2**63)]] = Field(min_length=1)
+
+
+class RetrySummary(Body):
+    attempt_id: Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{32}$")]
 
 
 PositiveID = Annotated[int, Field(gt=0)]
@@ -583,6 +588,20 @@ def create_app(
     def summaries(space: str, page: Page = 1, size: Size = 20):
         require_space(space)
         return catalog.summaries(space, page, size)
+
+    @app.get("/api/spaces/{space}/summaries/status")
+    def summary_status(space: str):
+        require_space(space)
+        if version < SUMMARY_VERSION:
+            raise HTTPException(409, "请先升级记忆核心以启用及时摘要")
+        return app.state.proxy.summaries.status(space)
+
+    @app.post("/api/spaces/{space}/summaries/retry")
+    async def retry_summary(space: str, body: RetrySummary):
+        await run_in_threadpool(require_space, space)
+        if version < SUMMARY_VERSION:
+            raise HTTPException(409, "请先升级记忆核心以启用及时摘要")
+        return await app.state.proxy.summaries.retry(space, body.attempt_id)
 
     @app.get("/api/spaces/{space}/diaries")
     def diaries(space: str, page: Page = 1, size: Size = 20):

@@ -179,6 +179,48 @@ class SummaryProxyTests(DatabaseTestCase):
                 0,
             )
 
+    def test_status_and_manual_retry_preserve_reply_progress_across_workers(self):
+        self.summary.fail = True
+        first = self.chat("第一句")
+        second = self.chat("第二句")
+        first_id = int(first.headers["x-memory-turn-id"])
+        second_id = int(second.headers["x-memory-turn-id"])
+        path = "/api/spaces/one/summaries"
+        self.assertEqual(self.http.get(path + "/status", headers=self.auth).status_code, 401)
+        model = SyntheticSummaryModel()
+        model.release.clear()
+        with TestClient(create_app(self.settings, summary_models=model), base_url=ORIGIN) as worker:
+            try:
+                csrf = worker.post("/api/login", headers={"Origin": ORIGIN},
+                                   json={"password": "synthetic admin"}).json()["csrf"]
+                failed = worker.get(path + "/status").json()
+                self.assertEqual((failed["status"], failed["cycle_count"], failed["trigger_count"]),
+                                 ("failed", 4, 4))
+                self.assertEqual(failed["attempt"]["turn_id"], second_id)
+                attempt = {"attempt_id": failed["attempt"]["id"]}
+                headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
+                self.assertEqual(worker.post(path + "/retry", json=attempt).status_code, 403)
+                self.assertEqual(worker.post(path + "/retry", headers=headers,
+                                             json={"attempt_id": "0" * 32}).json()["status"], "failed")
+                self.assertEqual(worker.post(path + "/retry", headers=headers, json=attempt).json()["status"],
+                                 "generating")
+                self.assertTrue(model.started.wait(2))
+                self.assertEqual(worker.get(path + "/status").json()["status"], "generating")
+                self.assertEqual(worker.post(path + "/retry", headers=headers, json=attempt).json()["status"],
+                                 "generating")
+            finally:
+                model.release.set()
+            worker.portal.call(worker.app.state.proxy.drain)
+            self.assertEqual(len(model.calls), 1)
+            final = worker.get(path + "/status").json()
+            self.assertEqual((final["status"], final["cycle_count"], final["covered_turn_ids"]),
+                             ("success", 2, [first_id]))
+            turns = worker.get("/api/spaces/one/conversations").json()["items"]
+            self.assertEqual([(turn["summary_progress"]["cycle_count"], turn["summarized"]) for turn in turns],
+                             [(2, True), (4, False)])
+            self.assertEqual(turns[-1]["summary_progress"]["status"], "success")
+            self.assertEqual(worker.get("/api/spaces/two/summaries/status").json()["status"], "idle")
+
     def test_tool_continuation_replays_frozen_raw_even_after_summary_commits(self):
         self.chat("第一句")
         self.summary.release.clear()

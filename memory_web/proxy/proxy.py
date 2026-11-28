@@ -316,7 +316,9 @@ class ProxyService:
         self.images = ImageJobs(settings,image_models,on_saved=self.summaries.schedule)
 
     async def save_archive(self, store, record, **values):
-        saved = await run_in_threadpool(store.finish, record, **values)
+        saved = await run_in_threadpool(
+            store.finish, record, summary_trigger_count=self.summaries.policy.trigger_messages, **values
+        )
         if saved:
             self.summaries.schedule(store.space_id, record["turn_id"])
         return saved

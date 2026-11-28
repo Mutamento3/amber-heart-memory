@@ -1,6 +1,6 @@
 """Supported storage versions; migrations are ordered and immutable once applied."""
 
-LATEST_VERSION = 33
+LATEST_VERSION = 34
 GRAPH_VERSION = 3
 DRAFT_VERSION = 4
 REVIEW_VERSION = 5
@@ -32,6 +32,7 @@ MEMORY_PARTIAL_DATE_VERSION = 30
 HOOK_VERSION = 31
 OPERIT_IMPORT_VERSION = 32
 DRAFT_POLICY_ALIGNMENT_VERSION = 33
+SUMMARY_PROGRESS_VERSION = 34
 SUPPORTED_VERSIONS = frozenset(range(1, LATEST_VERSION + 1))
 
 MIGRATION_FILES = {
@@ -67,4 +68,5 @@ MIGRATION_FILES = {
     31: "031_hook_turns.sql",
     32: "032_operit_import.sql",
     33: "033_align_unfinished_policy_revisions.sql",
+    34: "034_summary_progress.sql",
 }

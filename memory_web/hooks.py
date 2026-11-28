@@ -177,7 +177,10 @@ class Hooks:
                 if claude:
                     return _claude(event)
                 return _error(400, "invalid_hook_request", "reply 须包含正文")
-            result = await run_in_threadpool(store.complete, session, prompt, reply)
+            result = await run_in_threadpool(
+                store.complete, session, prompt, reply,
+                summary_trigger_count=self.proxy.summaries.policy.trigger_messages,
+            )
             self.proxy.summaries.schedule(space, result["turn_id"])
             return _claude(event) if claude else result
         except ConversationConflict as exc:

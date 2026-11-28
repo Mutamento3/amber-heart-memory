@@ -550,6 +550,12 @@ class ProxyService:
                     await lease.close()
 
     async def exchange(self, body, store, record, lease):
+        archive_only_usage = False
+        options = body.get("stream_options")
+        if store and body.get("stream") and (options is None or isinstance(options, dict)):
+            options = options or {}
+            archive_only_usage = options.get("include_usage") is not True
+            body = {**body, "stream_options": {**options, "include_usage": True}}
         client = self.client()
         try:
             response = await client.send(self.build(client, '/chat/completions', body), stream=True)
@@ -641,10 +647,18 @@ class ProxyService:
                         if isinstance(data, dict) and any(c.get('finish_reason') == 'tool_calls' for c in data.get('choices', [])):
                             tool_completion = True
                         clean_frames = archive.receipt.frames(frame, data) if archive else [frame]
+                        # A usage-only chunk is opt-in for the client, even when
+                        # the proxy requests it for local archiving.
+                        private_usage_frame = (
+                            archive_only_usage
+                            and isinstance(data, dict)
+                            and data.get("choices") == []
+                            and isinstance(data.get("usage"), dict)
+                        )
                         for clean in clean_frames:
                             if archive:
                                 archive.put(clean)
-                            if data != 'done' or not tool_completion:
+                            if not private_usage_frame and (data != 'done' or not tool_completion):
                                 yield clean
                         if archive:
                             if data == 'done' and tool_completion:

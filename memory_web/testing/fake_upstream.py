@@ -13,6 +13,7 @@ class FakeUpstream:
         self.reply = None
         self.stream_parts = None
         self.stream_finish = 'stop'
+        self.stream_usage = {'total_tokens': 13}
         self.tool_batches = None
         self.tool_models = {'synthetic-round'}
         self.round_reasoning = None
@@ -82,20 +83,25 @@ class FakeUpstream:
                     for start in range(0, len(data), 7):
                         self.wfile.write(data[start:start+7])
                         self.wfile.flush()
+
+                def send_usage():
+                    options = body.get('stream_options')
+                    if isinstance(options, dict) and options.get('include_usage') is True and owner.stream_usage is not None:
+                        send({'choices': [], 'usage': owner.stream_usage})
                 try:
                     if owner.stream_parts is not None:
                         for part in owner.stream_parts:
                             send(event({'content': part}))
                         if owner.stream_finish is not None:
                             send(event(finish=owner.stream_finish))
-                            send({'choices': [], 'usage': {'total_tokens': 13}})
+                            send_usage()
                             self.wfile.write(b'data: [DONE]\r\n\r\n')
                             self.wfile.flush()
                         return
                     if round_message:
                         send(event(round_message))
                         send(event(finish=round_finish))
-                        send({'choices': [], 'usage': {'total_tokens': 13}})
+                        send_usage()
                         self.wfile.write(b'data: [DONE]\r\n\r\n')
                         self.wfile.flush()
                         return
@@ -119,7 +125,7 @@ class FakeUpstream:
                     else:
                         send(event({'content': '第二段'}))
                         send(event(finish='stop'))
-                    send({'choices': [], 'usage': {'total_tokens': 13}})
+                    send_usage()
                     self.wfile.write(b'data: [DONE]\r\n\r\n')
                     self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):

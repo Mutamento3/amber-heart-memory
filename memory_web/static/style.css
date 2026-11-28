@@ -317,7 +317,10 @@ dialog p { margin-top: 12px; }
 .conversation-day > h2::before, .conversation-day > h2::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .conversation-summary-boundary { display: flex; align-items: center; gap: 12px; margin: 14px 0; color: var(--muted); font-size: 12px; }
 .conversation-summary-boundary::before, .conversation-summary-boundary::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
-.conversation-summary { display: flex; align-items: center; gap: 6px; margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.conversation-reply-meta { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; color: var(--muted); font-size: 11px; }
+.conversation-usage, .conversation-summary { margin-top: 3px; }
+.conversation-summary { display: flex; align-items: center; gap: 6px; }
+.conversation-usage + .conversation-summary::before { content: "·"; }
 .conversation-summary-success { color: #376747; font-weight: 700; }
 .conversation-summary-failed { color: var(--danger, #a33443); font-weight: 700; }
 button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }

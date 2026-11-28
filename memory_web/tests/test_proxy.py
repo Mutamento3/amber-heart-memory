@@ -149,6 +149,7 @@ class ProxyTests(DatabaseTestCase):
         self.assertEqual(self.chat(body).json()['choices'][0]['message']['content'], '合成回答')
         sent = self.fake.requests[-1]
         self.assertEqual(sent['body']['messages'][0], body['messages'][0])
+        self.assertNotIn('stream_options', sent['body'])
         self.assertNotIn('旧历史', str(sent['body']))
         self.assertNotIn('旧回复', str(sent['body']))
         self.assertTrue(sent['body']['messages'][-1]['content'].endswith('合成问句'))
@@ -167,6 +168,7 @@ class ProxyTests(DatabaseTestCase):
             response = self.chat(self.body(memory={'operation': 'non_chat'}, stream=True))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn('memory', self.fake.requests[-1]['body'])
+        self.assertNotIn('stream_options', self.fake.requests[-1]['body'])
         for name in ('turns', 'requests', 'messages', 'tool_events'):
             self.assertEqual(self.rows('conversation_' + name), [])
         with connect(self.app) as c:
@@ -210,6 +212,12 @@ class ProxyTests(DatabaseTestCase):
     def test_stream_unicode_heartbeat_usage_tools_and_safe_error(self):
         response = self.chat(self.body('synthetic-tools', stream=True))
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.fake.requests[-1]['body']['stream_options'], {'include_usage': True})
+        events = [json.loads(line[6:]) for line in response.text.splitlines()
+                  if line.startswith('data: ') and line != 'data: [DONE]']
+        self.assertFalse(any('usage' in event for event in events))
+        self.assertEqual(events[-1]['choices'][0]['finish_reason'], 'tool_calls')
+        self.assertIn('[DONE]', response.text)
         self.assertIn('第一段', response.text)
         self.assertIn('不应存档的合成思考', response.text)
         self.assertEqual(self.rows('conversation_messages')[1]['content_parts'][0]['text'], '第一段')
@@ -225,6 +233,37 @@ class ProxyTests(DatabaseTestCase):
         response = self.chat(self.body('synthetic-truncated', stream=True))
         self.assertIn('stream_read_failed', response.text)
         self.assertEqual(self.rows('conversation_requests')[-1]['state'], 'interrupted')
+
+    def test_stream_usage_is_archived_for_each_tool_step_and_respects_client_options(self):
+        self.fake.tool_batches = [[tool_call('usage-tool')]]
+        first_usage = {'prompt_tokens': 120, 'completion_tokens': 4, 'prompt_cache_hit_tokens': 100}
+        second_usage = {'prompt_tokens': 138, 'completion_tokens': 12,
+                        'prompt_tokens_details': {'cached_tokens': 115}}
+        options = {'include_obfuscation': False, 'include_usage': False}
+        self.fake.stream_usage = first_usage
+        first = self.chat(self.body('synthetic-round', stream=True, stream_options=options))
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(self.fake.requests[-1]['body']['stream_options'],
+                         {'include_obfuscation': False, 'include_usage': True})
+        self.assertNotIn('"usage"', first.text)
+        self.assertIn('[DONE]', first.text)
+        self.assertEqual(self.rows('conversation_requests')[0]['usage'], first_usage)
+
+        self.fake.stream_usage = second_usage
+        continuation = self.body('synthetic-round', stream=True, stream_options={'include_usage': True})
+        continuation['messages'] = [{'role': 'tool', 'tool_call_id': 'usage-tool', 'content': '合成工具结果'}]
+        second = self.chat(continuation)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(self.fake.requests[-1]['body']['stream_options'], {'include_usage': True})
+        self.assertEqual(first.headers['x-memory-turn-id'], second.headers['x-memory-turn-id'])
+        events = [json.loads(line[6:]) for line in second.text.splitlines()
+                  if line.startswith('data: ') and line != 'data: [DONE]']
+        self.assertEqual(events[-1], {'choices': [], 'usage': second_usage})
+
+        login = self.http.post('/api/login', headers={'Origin': ORIGIN}, json={'password': PASSWORD})
+        self.assertEqual(login.status_code, 200, login.text)
+        turn, = self.http.get('/api/spaces/one/conversations').json()['items']
+        self.assertEqual([request['usage'] for request in turn['requests']], [first_usage, second_usage])
 
     def test_images_forward_but_only_placeholder_is_archived(self):
         body = self.body()

@@ -320,6 +320,18 @@ def conversation_scrollback(page):
     older[-1]["summarized"] = True
     newest[-2]["summary_progress"] = dict(cycle_count=4, trigger_count=6)
     newest[-1]["summary_progress"] = dict(cycle_count=6, trigger_count=6, status="failed")
+    newest[-1]["requests"] = [
+        dict(usage=dict(prompt_tokens=120, completion_tokens=4, prompt_cache_hit_tokens=100,
+                        prompt_tokens_details=dict(cached_tokens=100))),
+        dict(usage=dict(prompt_tokens=138, completion_tokens=12,
+                        prompt_tokens_details=dict(cached_tokens=115))),
+    ]
+    newest[-2]["requests"] = [dict(usage=dict(prompt_tokens=12, completion_tokens=3,
+                                              prompt_tokens_details=dict(cached_tokens="未知")))]
+    newest[-3]["requests"] = [dict(usage=dict(completion_tokens=0, prompt_cache_hit_tokens=0)), dict(usage=None)]
+    final_reply = newest[-1]["messages"][-1]
+    newest[-1]["messages"].insert(1, dict(final_reply, id=1000, display_text="工具前的话"))
+    final_reply["event_index"] = 2
     attempt = dict(id="a" * 32, turn_id=30, business_date="2026-11-15", cycle_count=6, trigger_count=6)
     retry_requested = False
     status_reads_after_retry = 0
@@ -358,11 +370,20 @@ def conversation_scrollback(page):
     assert page.evaluate("innerHeight + scrollY >= document.documentElement.scrollHeight - 2")
     expect(page.locator(".conversation-summary:visible")).to_have_count(2)
     expect(page.locator('[data-turn="29"] .assistant .conversation-summary')).to_have_text("摘要：4/6 条")
-    progress = page.locator('[data-turn="30"] .assistant .conversation-summary')
+    latest = page.locator('[data-turn="30"] .assistant')
+    expect(latest.first.locator(".conversation-usage")).to_have_count(0)
+    meta = latest.last.locator(".conversation-reply-meta")
+    usage = meta.locator(".conversation-usage")
+    expect(usage).to_have_text("输入 258 · 输出 16 · 缓存 215")
+    expect(page.locator('[data-turn="29"] .conversation-usage')).to_have_text("输入 12 · 输出 3")
+    expect(page.locator('[data-turn="28"] .conversation-usage')).to_have_text("输出 0（部分） · 缓存 0（部分）")
+    expect(page.locator('[data-turn="27"] .conversation-usage')).to_have_count(0)
+    progress = meta.locator(".conversation-summary")
     expect(progress).to_contain_text("摘要：6/6 条")
     progress.get_by_role("button", name="重试生成及时摘要").click()
     expect(progress).to_contain_text("生成中")
     expect(progress.get_by_label("摘要已生成")).to_be_visible()
+    expect(usage).to_have_text("输入 258 · 输出 16 · 缓存 215")
     expect(page.locator('.conversation-summary-boundary + [data-turn="29"]')).to_have_count(1)
     top = page.evaluate("() => { scrollTo(0, 0); return document.querySelector('.conversation-turn[data-turn=\"11\"]').getBoundingClientRect().top }")
     expect(page.locator(".conversation-turn")).to_have_count(25)

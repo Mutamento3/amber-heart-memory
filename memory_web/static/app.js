@@ -1678,6 +1678,23 @@ async function conversationsPage(main, epoch, read, keepView) {
   const recallStatus = {ok: "召回完成", empty: "未召回卡片", failed: "召回失败，本轮未注入记忆", timeout: "召回超时，本轮未注入记忆", degraded: "召回已降级", skipped_image: "纯图片消息，跳过召回", expired: "原文已删除", not_run: "未记录召回"};
   const toggle = $(".conversation-delete-toggle");
   toggle.hidden = true;
+  function tokenUsageHTML(requests) {
+    const isCount = value => Number.isSafeInteger(value) && value >= 0;
+    const usage = requests.map(request => request.usage);
+    const fields = [
+      ["输入", item => item?.prompt_tokens],
+      ["输出", item => item?.completion_tokens],
+      ["缓存", item => [item?.prompt_cache_hit_tokens, item?.prompt_tokens_details?.cached_tokens].find(isCount)],
+    ];
+    const parts = fields.flatMap(([label, count]) => {
+      const values = usage.map(count).filter(isCount);
+      if (!values.length) return [];
+      const sum = values.reduce((total, value) => total + value, 0);
+      if (!isCount(sum)) return [];
+      return [`${label} ${sum}${values.length < usage.length ? "（部分）" : ""}`];
+    });
+    return parts.length ? `<span class="conversation-usage" title="本轮 token 用量">${parts.join(" · ")}</span>` : "";
+  }
   function summaryHTML(progress, attemptId = null) {
     if (!progress) return "";
     const count = `摘要：${esc(progress.cycle_count)}/${esc(progress.trigger_count)} 条`;
@@ -1693,6 +1710,7 @@ async function conversationsPage(main, epoch, read, keepView) {
     const assistant = turn.messages.filter(m =>
       m.role === "assistant" && (m.display_text ?? bodyText(m.content_parts)).trim()
     ).pop();
+    const usage = assistant ? tokenUsageHTML(turn.requests || []) : "";
     const events = turn.messages.map((m, index) => {
       const ai = m.role === "assistant";
       const body = turn.content_deleted_at ? "原文已删除" : (m.display_text ?? bodyText(m.content_parts));
@@ -1700,10 +1718,10 @@ async function conversationsPage(main, epoch, read, keepView) {
         ? `<details class="conversation-recall" data-turn="${turn.id}" data-request="${m.request_id}"><summary>本轮召回 ${turn.recall_count} 张记忆</summary><div class="recall-detail"></div></details>`
         : "";
       const progress = turn.summary_progress;
-      const summary = m === assistant
-        ? `<div class="conversation-summary" aria-live="polite"${progress ? "" : " hidden"}>${summaryHTML(progress)}</div>`
+      const meta = m === assistant
+        ? `<div class="conversation-reply-meta">${usage}<span class="conversation-summary" aria-live="polite"${progress ? "" : " hidden"}>${summaryHTML(progress)}</span></div>`
         : "";
-      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span><time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time>${m.content_state === "incomplete" ? '<span class="conversation-state">未完成</span>' : ""}</div><p class="conversation-body">${esc(body)}</p>${recall}${summary}</section>`;
+      const html = ai && !body.trim() ? "" : `<section class="conversation-message ${ai ? "assistant" : "user"}"><div class="conversation-heading"><span>${ai ? esc(assistantName()) : "你"}</span><time datetime="${esc(m.occurred_at)}">${esc(m.occurred_at?.slice(11, 16))}</time>${m.content_state === "incomplete" ? '<span class="conversation-state">未完成</span>' : ""}</div><p class="conversation-body">${esc(body)}</p>${recall}${meta}</section>`;
       return {index: m.event_index ?? index, html};
     });
     for (const tool of turn.tool_calls || []) {

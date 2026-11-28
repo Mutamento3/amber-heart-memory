@@ -4,6 +4,25 @@ English | [中文](CHANGELOG.md)
 
 What changed in each version. To upgrade, see [Upgrading](README.en.md#upgrading) in the README: run `git pull` in the install directory, then `./install.sh`; configuration and data are kept.
 
+## v0.6.1 · 2026-11-28
+
+- Redesigned Settings: anniversary, participants, access key, MCP connection, persona, import, auto-approval, memory bookmarks and user guide each get one row and open on their own page. The old "How memory works" is replaced by a fuller user guide, organized by topic: what each kind of memory is, where it comes from and when your companion sees it.
+- The "Recall" page is renamed "Chat records". Under each reply it shows summary progress (Summary: x/28 messages): a check mark once summarized, a red exclamation mark on failure that you can tap to regenerate, and a divider above the part already folded into a summary. Each turn also shows token usage and cache hits.
+- Instant summaries can be edited by hand.
+- Instant summaries now note exact times only at key moments (meals, going to sleep and waking up, feeling unwell and taking medicine, agreed times) instead of timestamping every line.
+- Claude models get cache breakpoints automatically, so repeated parts are billed at the cache rate (where the platform supports it, e.g. OpenRouter).
+- Fixed: after a memory tool call, the following turns almost never hit the cache.
+- Past tool records now go into a 【系统记录】 (system record) prefix on the next user message, so models no longer imitate them by writing fake tool calls in their replies; when a tool result can't be parsed, the record still shows what was called.
+- Fixed: after changing configuration, review drafts and imports got stuck; failed import cards could not be retried.
+- Fixed: interrupting a tool call and sending a new message left the turn stuck in "waiting for tools"; it now ends on its own and can be deleted.
+- Temporary 502/503/504 errors from the upstream during import are retried after a pause instead of failing the whole batch.
+- Fixed: on a plain http address (no HTTPS), the add and copy buttons in the admin page did nothing; editing core memory and bookmarks made the page jump.
+- DeepSeek and Operit imports no longer check the export format version, so files exported by newer app versions import too.
+- Fixed: upgrading after restoring a database backup failed with an installation structure mismatch.
+- The Operit connection guide adds a step: turn on "Disable user.md".
+- Saving participants now shows "Saved ✓".
+- The README now says Windows and Mac must install with Docker Desktop.
+
 ## v0.6.0 · 2026-11-22
 
 - New Operit import for both chat history and the memory library. Chats are grouped by character card for selection and use the reply version you picked in Operit; thinking and tool-call content is skipped, and images and files show as placeholder text. Only plain-text memory entries are imported, and they start unticked in the preview. Upload one JSON, both JSON files together, or a ZIP. See the [import guide](docs/import/operit.en.md).

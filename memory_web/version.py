@@ -1,3 +1,3 @@
 """Installed Amber Heart version; bumped in the release commit together with CHANGELOG."""
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"

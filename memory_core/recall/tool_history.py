@@ -1,4 +1,4 @@
-"""Readable cards for our two MCP tools; unknown client payloads stay opaque.
+"""Readable cards for our two MCP tools; raw unknown results stay opaque.
 
 This reads only the existing event ledger. It never queries memories or invokes
 models, and is deliberately separate from body-only diary/extraction material.
@@ -7,6 +7,7 @@ models, and is deliberately separate from body-only diary/extraction material.
 import json
 import re
 
+from ..bookmarks.bookmarks import BOOKMARK_ID
 from ..bookmarks.recent_note_text import SECTIONS
 from ..conversations import chat_text
 
@@ -16,6 +17,8 @@ ACTIONS = {'search': '搜索相关记忆', 'browse': '浏览记忆', 'get': '读
            'get_sources': '回查主题总结来源'}
 FOOTNOTE = '这些是审核后的记忆卡片，不是原始聊天逐字稿。'
 SEARCH_BOUNDARY = '这是相关候选，不是完整清单；完整盘点请用 browse。'
+BOOKMARK_SNIPPET_LIMIT = 30
+UNKNOWN_RESULT = '【结果未知】收到回传，但无法确认工具执行结果。'
 PAGE = re.compile(r'本页 (\d+) 条，共 (\d+) 条。')
 NEXT = re.compile(r'还有下一页，请使用 cursor=(\d+)。')
 CARD = re.compile(r'^\[(M-[1-9]\d*)\] 标题：([^\n]*)\n日期：([^\n]*)\n主题：([^\n]*)\n', re.M)
@@ -28,7 +31,7 @@ ERROR = re.compile(r'^(?:工具参数无效，|工具调用暂时失败|memory_i
                    r'action=(?:search|list_topics) 时|(?:browse|search|get_sources) 的 limit 最多为|'
                    r'(?:主题|实体)「|不支持的查记忆动作|content 不能为空|'
                    r'(?:add|update|delete) (?:必须|的 ids)|ids 只接受|section 必须是|'
-                   r'没找到编号 |编号 [0-9a-f]+ 匹配到多条书签)')
+                   r'没找到编号 |编号 [0-9a-f]+ 匹配到多条书签|改写书签失败，)')
 
 
 def one_line(value, limit=None):
@@ -145,18 +148,16 @@ def memory_items(action, body):
     return items, total, cursor
 
 
-def memory_card(args, body):
-    action = args.get('action')
-    if action not in (*ACTIONS, 'list_topics'):
-        raise ValueError('Unknown memory action')
-    visible = {key: args[key] for key in MEMORY_ARGUMENTS if key in args}
+def call_header(name, visible):
     encoded = json.dumps(visible, ensure_ascii=False)
     if len(encoded) > 4000:
         raise ValueError('Oversized call header')
-    lines = ['【调用工具】memory(' + encoded + ')']
-    if ERROR.match(body):
-        lines.append('【结果详情】' + one_line(body, 500))
-    elif action == 'list_topics':
+    return f'【调用工具】{name}({encoded})'
+
+
+def memory_result(action, args, body):
+    lines = []
+    if action == 'list_topics':
         prefix = '当前记忆池中有内容的主题：'
         if not body.startswith(prefix) or '\n' in body:
             raise ValueError('Unknown topics result')
@@ -194,12 +195,7 @@ def memory_card(args, body):
     return '\n'.join(lines)
 
 
-def bookmark_card(args, body):
-    action = args.get('action') or 'add'
-    if isinstance(action, str) and not action.strip():
-        action = 'add'
-    if action not in ('add', 'list', 'update', 'delete'):
-        raise ValueError('Unknown bookmark action')
+def bookmark_card(action, args, body):
     if action in ('update', 'delete'):
         ids = args.get('ids')
         if not isinstance(ids, list) or not all(isinstance(value, str) for value in ids):
@@ -210,17 +206,13 @@ def bookmark_card(args, body):
     target = one_line(str(target))
     if len(target) > 4000:
         raise ValueError('Oversized bookmark target')
-    if ERROR.match(body):
-        if body.startswith('没找到编号 '):
-            body = body.replace('可能已经进了快照、删除，或已撤回。', '可能已经整理、删除或撤回。', 1)
-        summary = one_line(body, 500)
-    elif action in ('add', 'update'):
+    if action in ('add', 'update'):
         match = re.fullmatch(r'已(记下|改写)【([^】]+)】书签 ([0-9a-f]{8})：(.*)', body, re.S)
         if (match is None or match[1] != ('记下' if action == 'add' else '改写')
                 or match[2] not in SECTIONS.values()):
             raise ValueError('Unknown bookmark result')
         verb = '已记下' if action == 'add' else '已改写'
-        summary = f'{verb}【{match[2]}】书签 {match[3]}：' + one_line(match[4], 30)
+        summary = f'{verb}【{match[2]}】书签 {match[3]}：' + one_line(match[4], BOOKMARK_SNIPPET_LIMIT)
     elif action == 'list':
         # Previously stored tool results still use the old list heading.
         match = re.match(r'共 (\d+) 条(?:待整理书签|待进快照书签)(?:（返回前 100 条）)?(?:\n|$)', body)
@@ -229,7 +221,7 @@ def bookmark_card(args, body):
         snippets = re.findall(r'^\[[0-9a-f]{8}\]【[^】]+】([^\n]+)', body, re.M)
         summary = match[0].strip().replace('待进快照书签', '待整理书签')
         if snippets:
-            summary += '：' + '；'.join(one_line(value, 30) for value in snippets[:8])
+            summary += '：' + '；'.join(one_line(value, BOOKMARK_SNIPPET_LIMIT) for value in snippets[:8])
     else:
         if not re.match(r'已撤回 \d+ 条书签(?:\n|$)', body):
             raise ValueError('Unknown bookmark withdrawal')
@@ -237,16 +229,61 @@ def bookmark_card(args, body):
     return f'【调用工具】mark_moment({action}, {target})\n【结果摘要】{summary}'
 
 
+def bookmark_intent(action, args):
+    visible = {'action': action}
+    section = args.get('section')
+    if isinstance(section, str) and section in SECTIONS:
+        visible['section'] = section
+    content = args.get('content')
+    if action in ('add', 'update') and isinstance(content, str) and content.strip():
+        visible['content'] = one_line(content, BOOKMARK_SNIPPET_LIMIT)
+    ids = args.get('ids')
+    if action in ('update', 'delete') and isinstance(ids, list):
+        targets = [value for value in ids if isinstance(value, str) and BOOKMARK_ID.fullmatch(value)]
+        if targets:
+            visible['ids'] = targets
+    return visible
+
+
 def render_tool_card(call, result):
-    """Return None for unknown names, pending calls or malformed client text."""
+    """Render recognized results or retain the intent when a return is opaque."""
     if result is None:
         return None
     try:
         args = object_value(call['payload']['arguments'])
         name, args = tool_identity(call.get('tool_name'), args)
-        body = result_text(result)
-        if not body:
-            return None
-        return memory_card(args, body) if name == 'memory' else bookmark_card(args, body)
+        action = args.get('action')
+        if name == 'memory':
+            if action not in (*ACTIONS, 'list_topics'):
+                return None
+            visible = {
+                key: args[key] for key in MEMORY_ARGUMENTS
+                if key in args and (args[key] is None or isinstance(args[key], (str, int)))
+            }
+            header = call_header(name, visible)
+        else:
+            if not action or (isinstance(action, str) and not action.strip()):
+                action = 'add'
+            if action not in ('add', 'list', 'update', 'delete'):
+                return None
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         return None
+
+    try:
+        body = result_text(result)
+        if body and not ERROR.match(body):
+            if name == 'memory':
+                return f'{header}\n{memory_result(action, args, body)}'
+            return bookmark_card(action, args, body)
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        body = ''
+
+    if name == 'mark_moment':
+        try:
+            header = call_header(name, bookmark_intent(action, args))
+        except ValueError:
+            return None
+        if body.startswith('没找到编号 '):
+            body = body.replace('可能已经进了快照、删除，或已撤回。', '可能已经整理、删除或撤回。', 1)
+    outcome = '【执行失败】' + one_line(body, 500) if body else UNKNOWN_RESULT
+    return f'{header}\n{outcome}'

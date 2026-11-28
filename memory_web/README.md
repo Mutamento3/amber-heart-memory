@@ -251,7 +251,7 @@ Kelivo 可按上述方式配置；本批已用官方 Python SDK 客户端完成�
 
 代理给聊天模型组装下一轮上下文时，`memory` 和 `mark_moment` 根据已存的调用参数和客户端回传文字留下可读卡片。其他工具只留名字和是否返回，未返回的调用保留“未返回”。每轮的工具记录加上 `【系统记录】`，放在下一条实际用户消息开头。只有本轮带入的历史含工具记录时，才在补充上下文末尾附上“历史中的工具记录仅供参考，需要使用工具时直接调用”，以保留之前的聊天缓存前缀。不调模型，不重新查库，不增加 MCP 使用次数或回执。`memory` 留分页、编号/日期/标题/状态及摘要（get 为正文），普通卡最多 500 字、总结 4000 字，search/browse 每次最多 12 条；get_sources 列出这一页全部来源目录，不截 12 条、不附正文，list_topics 留主题列表，明确的查询错误留错误摘要。书签留动作和短结果摘要。日记、及时摘要和抽卡继续只读真实聊天正文，不消费这些卡片。
 
-名称按 2026-11-10 的客户端源码核对：Kelivo 原名无冲突时不变，冲突用 `<服务器名>__<工具名>`，可能加八字符服务器 ID 或数字后缀，整体最多 64 字符；Operit 用 `<服务器名>:<工具名>`，OpenAI 工具调用还可能用 package_proxy/proxy 的 tool_name 与 params 封装。只有名称和返回文字都可识别才生成卡片；截断后认不出名称、未知格式或解析失败时保留原来的一行。当前不推断其他客户端的任意改名规则。
+名称按 2026-11-10 的客户端源码核对：Kelivo 原名无冲突时不变，冲突用 `<服务器名>__<工具名>`，可能加八字符服务器 ID 或数字后缀，整体最多 64 字符；Operit 用 `<服务器名>:<工具名>`，OpenAI 工具调用还可能用 package_proxy/proxy 的 tool_name 与 params 封装。能识别工具和调用参数时，异常回传也保留调用意图。能识别的错误显示简短说明，其他回传标明结果未知。工具名称或调用参数无法识别时保留原来的一行。当前不推断其他客户端的任意改名规则。
 
 源码依据：[Kelivo 工具路由和文字回传](https://github.com/Chevey339/kelivo/blob/4857da608734ae42058897975c7b2ad573502577/lib/core/services/mcp/mcp_tool_service.dart)、[OpenAI 工具消息](https://github.com/Chevey339/kelivo/blob/4857da608734ae42058897975c7b2ad573502577/lib/core/services/api/providers/openai/openai_tool_transcript.dart)；[Operit MCP 执行器](https://github.com/AAswordman/Operit/blob/16cffb98f52a11dc77bd0a789ffa0b01ed398ee4/app/src/main/java/com/ai/assistance/operit/core/tools/mcp/MCPToolExecutor.kt)、[包工具代理](https://github.com/AAswordman/Operit/blob/16cffb98f52a11dc77bd0a789ffa0b01ed398ee4/app/src/main/java/com/ai/assistance/operit/api/chat/llmprovider/OpenAIProvider.kt)、[proxy 识别](https://github.com/AAswordman/Operit/blob/16cffb98f52a11dc77bd0a789ffa0b01ed398ee4/app/src/main/java/com/ai/assistance/operit/api/chat/llmprovider/StructuredToolCallBridge.kt)。
 
@@ -272,7 +272,7 @@ Kelivo 可按上述方式配置；本批已用官方 Python SDK 客户端完成�
 
 ### 上下文顺序、人设、时间和图片
 
-顺序固定为：人设 → 日记 → 已整理的书签 → 及时摘要 → 当天原话 → 补充上下文（本轮召回 + 当前时间） → 固定 AI 确认 → 当前用户消息。补充上下文是一条 user 消息，固定确认是一条 assistant 消息；人设之后不插入动态 system 消息。召回为空时仍发送当前时间及确认。日记位按安装时区的自然日取近 N 日内已完成的较早业务日日记（默认 N 为 3），最多 N 篇，按日期升序注入，没有日记不发送占位文字；已整理的书签按四个分区注入，全空跳过；及时摘要仅注入本轮业务日有效覆盖的内容。历史按完整轮次读取 current 版本，重做时排除被重做的位置，成功采用后下轮才使用新版本。历史保留用户正文与 AI 各步骤的全部有效正文（含调用工具前的说明），忽略思考、工具参数与结果；工具仅用名称加简短状态说明，按调用顺序保留每个工具名；只区分“已返回”和“未返回”，不根据工具载荷推断成功或失败。没有收到任何 AI 正文时只在用户消息后标“未获回应”；已有正文后中断，或工具前已说过话但整轮失败时，只标“未完成”。
+顺序固定为：人设 → 日记 → 已整理的书签 → 及时摘要 → 当天原话 → 补充上下文（本轮召回 + 当前时间） → 固定 AI 确认 → 当前用户消息。补充上下文是一条 user 消息，固定确认是一条 assistant 消息；人设之后不插入动态 system 消息。召回为空时仍发送当前时间及确认。日记位按安装时区的自然日取近 N 日内已完成的较早业务日日记（默认 N 为 3），最多 N 篇，按日期升序注入，没有日记不发送占位文字；已整理的书签按四个分区注入，全空跳过；及时摘要仅注入本轮业务日有效覆盖的内容。历史按完整轮次读取 current 版本，重做时排除被重做的位置，成功采用后下轮才使用新版本。历史保留用户正文与 AI 各步骤的全部有效正文（含调用工具前的说明），忽略思考、工具参数与结果；工具记录按调用顺序保留。自有工具使用上文的历史卡片，其他工具只保留名称和“已返回”或“未返回”状态。没有收到任何 AI 正文时只在用户消息后标“未获回应”；已有正文后中断，或工具前已说过话但整轮失败时，只标“未完成”。
 
 设置中的人设使用与参与者相同的空间配置修订锁，`PATCH /api/spaces/{space}/persona` 接收 `expected_revision` 和 `persona`，陈旧页面返回 409。人设非空就替换前端所有 system/developer 提示词，包括附在其中的世界书；空白保存为空字符串，沿用前端提示词。修改从下一轮开始，已开始的工具轮次继续用冻结人设。人设最多 100000 字。设置页可导入 UTF-8 编码的 .txt、.md，以及 .docx。Word 文件在浏览器里提取正文段落为纯文本，解压后的正文 XML 最多 32 MiB。现有人设有内容时会先确认替换，导入后与手动编辑一样自动保存。
 

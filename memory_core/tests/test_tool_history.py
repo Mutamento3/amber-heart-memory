@@ -49,18 +49,25 @@ class ToolHistoryTests(unittest.TestCase):
                 call, result = events(proxy, dict(tool_name='amber-heart:memory',params=params),memory_body())
                 self.assertIn('【调用工具】memory(',render_tool_card(call,result))
 
-    def test_foreign_names_malformed_pending_and_unsupported_results_stay_opaque(self):
+    def test_foreign_names_malformed_calls_and_pending_results_stay_opaque(self):
         for name in ('recall_memory','memory_backup','memory__other','arbitrary-memory', 'amber-heart:memory:other'):
             call,result=events(name,dict(action='get'),memory_body())
             self.assertIsNone(render_tool_card(call,result))
         call,result=events('memory',dict(action='get'),memory_body())
         self.assertIsNone(render_tool_card(call,None))
-        for payload in (None, {'content': []}, {'content':[{'type':'image_placeholder'}]},
-                        {'content':[{'type':'text','text':'unrecognized secret payload'}]}):
-            with self.subTest(payload=payload):
-                self.assertIsNone(render_tool_card(call,dict(result,payload=payload)))
         for arguments in ('{bad','[]',{'action':[]},'{}'):
             self.assertIsNone(render_tool_card(dict(call,payload={'arguments':arguments}),result))
+
+    def test_unknown_memory_results_keep_only_supported_call_arguments(self):
+        call, result = events('memory', dict(action='search', query='上次约好怎么整理照片',
+                              topic={'private': 'hidden'}, extra='hidden'), 'unrecognized secret payload')
+        for payload in (None, {'content': []}, {'content': [{'type': 'image_placeholder'}]}, result['payload']):
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    render_tool_card(call, dict(result, payload=payload)),
+                    '【调用工具】memory({"action": "search", "query": "上次约好怎么整理照片"})\n'
+                    '【结果未知】收到回传，但无法确认工具执行结果。',
+                )
 
     def test_get_and_summary_limits_do_not_depend_on_private_tool_trace(self):
         args=dict(action='get',memory_id='M-1')
@@ -109,9 +116,10 @@ class ToolHistoryTests(unittest.TestCase):
         call,result=events('memory',dict(action='list_topics',source_scope='all'),'当前记忆池中有内容的主题：甲、乙')
         self.assertIn('【可查询主题｜全部记忆】共2个：甲、乙',render_tool_card(call,result))
         call,result=events('memory',dict(action='get',memory_id='M-404'),'没有找到记忆 M-404，它可能已删除或不属于当前空间')
-        self.assertIn('【结果详情】没有找到记忆 M-404',render_tool_card(call,result))
+        self.assertIn('【执行失败】没有找到记忆 M-404',render_tool_card(call,result))
         call,result=events('memory',dict(action='browse'),memory_body('browse').replace('本页 1 条','本页 2 条'))
-        self.assertIsNone(render_tool_card(call,result))
+        self.assertEqual(render_tool_card(call,result),
+                         '【调用工具】memory({"action": "browse"})\n【结果未知】收到回传，但无法确认工具执行结果。')
 
     def test_bookmark_default_add_list_update_delete_and_fallback(self):
         values=[({}, '已记下【健康关注】书签 a1b2c3d4：2026年11月9日 已约复诊', 'add, 全部'),
@@ -124,8 +132,20 @@ class ToolHistoryTests(unittest.TestCase):
             card=render_tool_card(call,result)
             self.assertIn('mark_moment('+label+')',card)
             self.assertIn('【结果摘要】',card)
-        call,result=events('mark_moment',{'section':'health'},'unrecognized secret result')
-        self.assertIsNone(render_tool_card(call,result))
+        call, result = events('mark_moment', dict(action='update', section='longterm',
+                              content='甲' * 31, ids=['a1b2c3d4', 'invalid private value']), 'McpError: connection abort')
+        self.assertEqual(
+            render_tool_card(call, result),
+            '【调用工具】mark_moment({"action": "update", "section": "longterm", "content": "'
+            + '甲' * 30 + '…", "ids": ["a1b2c3d4"]})\n【结果未知】收到回传，但无法确认工具执行结果。',
+        )
+        call, result = events('mark_moment', {'section': 'longterm'},
+                              '工具参数无效，请核对类型、范围和必填项：content')
+        self.assertEqual(
+            render_tool_card(call, result),
+            '【调用工具】mark_moment({"action": "add", "section": "longterm"})\n'
+            '【执行失败】工具参数无效，请核对类型、范围和必填项：content',
+        )
 
     def test_call_id_order_fallback_and_unanswered_semantics_are_preserved(self):
         call,result=events('memory',dict(action='get'),memory_body())

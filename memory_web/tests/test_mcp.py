@@ -381,8 +381,12 @@ class MCPTests(DatabaseTestCase):
         bookmark_args = dict(action='add',section='health',content='2026年11月10日 已约好下周复诊。')
         marked = self.rpc('tools/call',dict(name='mark_moment',arguments=bookmark_args)).json()['result']
         texts.append(marked['content'][0]['text'])
-        args = queries + [dict(tool_name='amber-heart:mark_moment',params=bookmark_args)]
-        names = ['memory','amber_heart__memory_server_1','amber-heart:memory','package_proxy']
+        aborted_args = dict(action='add', section='longterm', content='周末一起整理旅行照片')
+        saved = self.rpc('tools/call', dict(name='mark_moment', arguments=aborted_args)).json()['result']
+        self.assertIn('已记下【长期事项】', saved['content'][0]['text'])
+        texts.append('McpError: connection abort')
+        args = queries + [dict(tool_name='amber-heart:mark_moment',params=bookmark_args), aborted_args]
+        names = ['memory','amber_heart__memory_server_1','amber-heart:memory','package_proxy','mark_moment']
         calls, results = [], []
         for index,(name,arguments,body) in enumerate(zip(names,args,texts)):
             call,result = events(name,arguments,body,identifier='our-'+str(index))
@@ -418,6 +422,12 @@ class MCPTests(DatabaseTestCase):
         self.assertIn('合成复查约定的完整正文',history)
         self.assertIn('【检索边界】相关候选，不是完整清单',history)
         self.assertIn('【结果摘要】已记下【健康关注】',history)
+        self.assertIn(
+            '【调用工具】mark_moment({"action": "add", "section": "longterm", "content": "周末一起整理旅行照片"})\n'
+            '【结果未知】收到回传，但无法确认工具执行结果。',
+            history,
+        )
+        self.assertNotIn('connection abort', history)
         self.assertNotIn('完整结果在 tool_trace',history)
         self.assertEqual(self.usage(mid)['used_count'],1)
         with connect(self.app) as c:
@@ -428,6 +438,8 @@ class MCPTests(DatabaseTestCase):
         self.assertNotIn('【调用工具】',dialogue)
         self.assertNotIn('合成复查约定的完整正文',dialogue)
         self.assertNotIn('【结果摘要】',str(segments))
+        self.assertNotIn('周末一起整理旅行照片', dialogue)
+        self.assertNotIn('周末一起整理旅行照片', str(segments))
         self.assertIn('已核对复诊安排。',dialogue)
         self.assertIn('继续刚才的话题。',dialogue)
         # Another space never receives this ledger or any of its cards.

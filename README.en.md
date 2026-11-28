@@ -353,7 +353,7 @@ Choose `own` as the HTTPS method during installation. The memory server only lis
 
 ### Can I install it on my own computer?
 
-Yes: on Windows or Mac, it runs the same way once Docker Desktop is installed. But when the computer is off or asleep the memory server stops and chats can't connect; the nightly jobs are caught up automatically after it starts again (up to the last 30 days). To connect from your phone to the computer at home while you're out, you'll also need a networking tool such as Tailscale. We haven't tested this setup, and we recommend a VPS.
+Yes: on a Mac, install Docker Desktop and run the install script; on Windows, install Docker Desktop (which also enables WSL2) and run the install script in a WSL terminal. Installing directly on the system without Docker is not supported. But when the computer is off or asleep the memory server stops and chats can't connect; the nightly jobs are caught up automatically after it starts again (up to the last 30 days). To connect from your phone to the computer at home while you're out, you'll also need a networking tool such as Tailscale. We haven't tested this setup, and we recommend a VPS.
 
 ## Memory limits
 

@@ -57,6 +57,26 @@ python3 -m memory_web
 
 删除前二次确认，后台在同一事务清理卡片、索引、图谱与审核副本，保留抽卡计数；共享实体、参与者及既有主题总结保留。已知限制：没有删除指纹，重复抽卡或重复导入时可能再次出现已删卡。
 
+## 管理接口一览
+
+管理网页的接口都要先登录，访问钥匙调用不了：`POST /api/login`，请求体 `{"password": "管理密码", "remember": false}`，返回 `csrf` 并设置登录 Cookie。之后的修改请求带上 Cookie、`X-CSRF-Token: <csrf>`、`Origin: <管理网页地址>` 和 `Content-Type: application/json`。`{space}` 是空间标识，可从 `GET /api/spaces` 读取。
+
+修改空间设置时，`expected_revision` 填 `GET /api/spaces/{space}/configuration` 返回的当前 `revision`；页面或请求过期返回 409，重新读取后再改。`/configuration` 的 PATCH 只改相识日，人设、核心记忆等各有自己的接口：
+
+| 要改什么 | 方法和路径 | 请求体 |
+|---|---|---|
+| 读取当前设置（含 `revision`） | `GET /api/spaces/{space}/configuration` | — |
+| 人设（清空传 `""`） | `PATCH /api/spaces/{space}/persona` | `expected_revision`、`persona` |
+| 核心记忆 | `PATCH /api/spaces/{space}/core-memory` | `expected_revision`、`core_memory` |
+| 相识日（清空传 `null`） | `PATCH /api/spaces/{space}/configuration` | `expected_revision`、`acquaintance_date` |
+| 参与者名字和又名 | `PUT /api/spaces/{space}/participants` | `expected_revision`、`user`、`assistant`（各含 `name`、`aliases`），可选 `acquaintance_date` |
+| 待审核卡自动收录开关 | `PATCH /api/spaces/{space}/auto-approval` | `expected_revision`、`auto_approve_enabled` |
+| 记忆书签“月经周期”开关 | `PATCH /api/spaces/{space}/period-notes` | `expected_revision`、`period_notes_enabled` |
+| 记忆书签正文 | `GET` / `PUT /api/spaces/{space}/recent-notes` | PUT：`expected_version`（GET 返回的 `version`）、`sections` |
+| 访问钥匙 | `GET` 查看、`POST` 生成新钥匙（旧的作废）、`DELETE` 作废 `/api/spaces/{space}/access-key` | — |
+
+各接口的细节见下文对应章节。
+
 ## 配置接口：相识日
 
 `GET /api/spaces/{space}/configuration` 返回 `acquaintance_date`，未设置为 JSON `null`。相识日为严格的 `YYYY-MM-DD` 有效日期；不接受空字符串、时间戳或自动补零。仅表示日历日期，不做时区换算，也不限制为过去日期。

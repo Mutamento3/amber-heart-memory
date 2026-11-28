@@ -335,6 +335,7 @@ If you are an AI assistant installing this on a user's behalf:
 - **Do not fill in the persona for the user.** Once the persona has content, it replaces the system prompt, character cards and lorebooks in the user's chat app; left empty, the app's own are used. Let the user decide whether to fill it in.
 - After installing, tell the user that "Settings → Access keys" (设置 → 访问钥匙) in the admin web app has a connection guide (接入指南) with step-by-step setup for Kelivo and Operit; in particular, remind them to turn off the app's own memory and conversation summaries, and that a persona replaces the app's character cards and lorebooks.
 - The admin web app's endpoints (such as `/api/spaces/{space}/access-key`) can only be called after the user logs in to the web app, not with the access key; have the user generate and copy the key on the web page.
+- To change settings through the API (persona, core memory, participants and so on), see the [admin API overview](memory_web/README.md#管理接口一览) (in Chinese).
 
 ### Already running nginx or another reverse proxy
 

@@ -341,7 +341,7 @@ class SummaryProxyTests(DatabaseTestCase):
             400,
         )
 
-    def test_delete_invalidates_rollup_and_rebuilds_summary_from_surviving_turns(self):
+    def test_admin_summary_edit_injects_next_turn_and_is_replaced_by_delete_rebuild(self):
         self.application.state.proxy.summaries.policy = SummarySettings(
             trigger_messages=6, retain_turns=1, rollup_trigger=3
         )
@@ -356,8 +356,27 @@ class SummaryProxyTests(DatabaseTestCase):
         self.assertEqual([summary["id"] for summary in active], [rollup["id"]])
         csrf = self.http.post("/api/login", headers={"Origin": ORIGIN},
                               json={"password": "synthetic admin"}).json()["csrf"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
+        summaries_url = "/api/spaces/one/summaries"
+        summary_url = f"{summaries_url}/{rollup['id']}"
+        listed, = self.http.get(summaries_url).json()["items"]
+        self.assertEqual((listed["id"], listed["revision"]), (rollup["id"], 1))
+        patch = {"content": "手改后的二次摘要", "expected_revision": 1}
+        self.assertEqual(self.http.patch(summary_url, json=patch).status_code, 403)
+        self.assertEqual(self.http.patch(summary_url.replace("/one/", "/two/"),
+                                         headers=headers, json=patch).status_code, 409)
+        edited = self.http.patch(summary_url, headers=headers, json=patch)
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json(), dict(id=rollup["id"], content=patch["content"], revision=2))
+        self.assertEqual(self.http.get(summary_url).json()["summary"]["revision"], 2)
+        self.assertEqual(self.http.patch(summary_url, headers=headers, json=patch).status_code, 409)
+        self.assertEqual(self.http.patch(summary_url, headers=headers,
+                                         json={"content": "  ", "expected_revision": 2}).status_code, 400)
+        self.assertEqual(self.chat("修改后继续说话").status_code, 200)
+        self.assertIn(patch["content"], str(self.fake.requests[-1]["body"]["messages"]))
+
         response = self.http.post("/api/spaces/one/conversations/delete",
-                                  headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+                                  headers=headers,
                                   json={"position_ids": [turns[2]]})
         self.assertEqual(response.json(), {"deleted": 1})
         self.http.portal.call(self.application.state.proxy.drain)
@@ -367,13 +386,16 @@ class SummaryProxyTests(DatabaseTestCase):
             active = active_summaries(c, "one", rollup["business_date"])
         self.assertIsNone(expired["content"])
         self.assertIsNotNone(expired["content_deleted_at"])
+        self.assertEqual(self.http.patch(summary_url, headers=headers,
+                                         json={**patch, "expected_revision": 2}).status_code, 409)
         self.assertCountEqual([turn_id for summary in active for turn_id in summary["covered_turn_ids"]],
-                              [turns[0], turns[1], turns[3], turns[4], turns[5]])
+                              [turns[0], turns[1], turns[3], turns[4], turns[5], turns[6]])
         self.assertIn("合成第4轮原话", self.summary.calls[-1][1])
         self.assertNotIn("合成第3轮原话", self.summary.calls[-1][1])
         self.chat("删除后继续说话")
         sent = str(self.fake.requests[-1]["body"]["messages"])
         self.assertNotIn("合成第3轮原话", sent)
+        self.assertNotIn(patch["content"], sent)
 
     def test_configured_default_http_summary_adapter_only_calls_fake_upstream(self):
         from dataclasses import replace

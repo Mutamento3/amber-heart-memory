@@ -12,9 +12,13 @@ from ..conversations.conversation_material import UNCOVERED_TURNS, dialogue_inpu
 from ..conversations.conversation_rounds import fingerprint
 from ..conversations.conversations import ConversationStore, SUMMARY_RETENTION_DAYS
 from ..storage.db import background_lock, connect
-from ..storage.schema import SUMMARY_PROGRESS_VERSION, SUMMARY_VERSION
+from ..storage.schema import SUMMARY_EDIT_VERSION, SUMMARY_PROGRESS_VERSION, SUMMARY_VERSION
 from ..storage.space import read_policy
 from .summary_policy import SummarySettings, summary_batch
+
+
+class SummaryConflict(ValueError):
+    pass
 
 
 def active_summaries(connection, space, day):
@@ -96,6 +100,35 @@ class SummaryStore(ConversationStore):
         if self.schema_version < SUMMARY_VERSION:
             raise ValueError("及时摘要需要先升级记忆核心到版本 12")
         self.summary_settings = settings or SummarySettings()
+
+    def edit(self, identifier, content, expected_revision):
+        if self.schema_version < SUMMARY_EDIT_VERSION:
+            raise SummaryConflict("请先升级记忆核心以修改及时摘要")
+        if (
+            type(identifier) is not int
+            or identifier <= 0
+            or type(expected_revision) is not int
+            or expected_revision <= 0
+            or not isinstance(content, str)
+            or not content.strip()
+            or len(content) > 100000
+        ):
+            raise ValueError("摘要正文或修订号无效")
+        with connect(self.dsn) as c:
+            # Serialize with deletion and rollup publication. A rollup planned
+            # before the edit will fail its existing source fingerprint check.
+            self._lock(c)
+            row = c.execute(
+                """UPDATE memory_core.conversation_summaries
+                SET content=%s,revision=revision+1
+                WHERE id=%s AND bot_id=%s AND revision=%s
+                AND content_deleted_at IS NULL AND merged_into_id IS NULL
+                RETURNING id,content,revision""",
+                (content.strip(), identifier, self.space_id, expected_revision),
+            ).fetchone()
+            if not row:
+                raise SummaryConflict("摘要已在别处修改、合并或不存在，请核对最新版本后保存")
+            return row
 
     @property
     def _lock_key(self):

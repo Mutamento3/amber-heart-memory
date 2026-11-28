@@ -136,6 +136,7 @@ const affectedPages = {
   "topic-summaries": reviewPages,
   cards: reviewPages,
   diaries: ["diaries", "overview"],
+  summaries: ["summaries"],
   conversations: ["conversations", "summaries", "overview", ...reviewPages],
   "recent-notes": ["bookmarks", "overview"],
   bookmarks: ["bookmarks", "overview"],
@@ -1637,6 +1638,7 @@ async function summariesPage(main, epoch, read) {
     return;
   }
   const days = new Map();
+  let closeEditor;
   for (const item of data.items) {
     if (!days.has(item.business_date)) days.set(item.business_date, []);
     days.get(item.business_date).push(item);
@@ -1644,7 +1646,32 @@ async function summariesPage(main, epoch, read) {
   const time = (item) => `${(item.start_at || "").slice(11, 16)}–${(item.end_at || "").slice(11, 16)}`;
   main.innerHTML = `<section id="summary-library" aria-label="及时摘要记录">${[...days].map(([day, items], index) =>
     `<details class="summary-day" ${index === 0 ? "open" : ""}><summary><span>${diaryDate(day)}</span></summary>${items.map((item) =>
-      `<article class="summary-entry card"><h2 class="summary-when">${esc(time(item))}</h2><p class="summary-text">${esc(item.content || "")}</p></article>`).join("")}</details>`).join("")}<p class="muted summary-retention">只保留最近 15 天，更早的日子可以看日记。</p></section>`;
+      `<article class="summary-entry card" data-summary="${esc(item.id)}"><h2 class="summary-when">${esc(time(item))}</h2><div class="summary-reader"></div></article>`).join("")}</details>`).join("")}<p class="muted summary-retention">只保留最近 15 天，更早的日子可以看日记。</p></section>`;
+  function show(target, saved) {
+    const editButton = saved.revision
+      ? '<div class="summary-actions"><button type="button" class="quiet edit-summary">编辑</button></div>'
+      : "";
+    target.innerHTML = `<p class="summary-text">${esc(saved.content || "")}</p>${editButton}`;
+    const button = $(".edit-summary", target);
+    if (!button) return;
+    button.onclick = async () => {
+      if (!await allowLeave() || !target.isConnected) return;
+      closeEditor?.();
+      closeEditor = editRevisionedText(target, {
+        kind: "summary",
+        label: "摘要正文",
+        path: url(`/summaries/${saved.id}`),
+        saved,
+        onClose: (updated) => {
+          closeEditor = null;
+          show(target, updated);
+        },
+      });
+    };
+  }
+  for (const item of data.items) {
+    show($(`[data-summary="${item.id}"] .summary-reader`, main), item);
+  }
 }
 async function conversationsPage(main, epoch, read, keepView) {
   const status = {failed: "上游失败 · 未获回应", incomplete: "未完成", generating: "正在回复", waiting_tools: "等待工具"};
@@ -2172,6 +2199,33 @@ function diaryExcerpt(content) {
   const text = diaryBodyText(content).replace(/\s+/g, " ").trim();
   return text.length > 120 ? text.slice(0, 120) + "…" : text;
 }
+function editRevisionedText(target, {kind, label, path, saved, onSaved, onClose}) {
+  const id = `${kind}-content`;
+  target.innerHTML = `<form class="${kind}-form"><div class="readfield"><label for="${id}">${label}</label><textarea id="${id}" name="content" rows="6" maxlength="100000" required>${esc(saved.content)}</textarea></div>${saveStatusHTML()}<div class="${kind}-actions"><button type="button" class="quiet close-${kind}">完成编辑</button></div></form>`;
+  const form = $("form", target);
+  const input = $("textarea", form);
+  const saver = autoSave($(".autosave-status", form), () => input.value, async (content) => {
+    if (!content.trim()) throw new Error(`${label}不能为空`);
+    saved = await api(path, {
+      method: "PATCH",
+      body: {content, expected_revision: saved.revision},
+    });
+    onSaved?.(saved);
+  });
+  input.addEventListener("input", () => fitTextarea(input));
+  wireAutoSave(form, saver);
+  form.onsubmit = (event) => event.preventDefault();
+  const close = () => {
+    saver.dispose();
+    onClose(saved);
+  };
+  $(`.close-${kind}`, form).onclick = async () => {
+    if (await allowLeave() && form.isConnected) close();
+  };
+  fitTextarea(input);
+  input.focus();
+  return close;
+}
 async function diariesPage(main, epoch, read) {
   let serial = 0;
   let closeEditor;
@@ -2231,34 +2285,22 @@ async function diariesPage(main, epoch, read) {
     $(".edit-diary", target).onclick = () => edit(row, saved);
   }
   function edit(row, saved) {
-    const target = $(".diary-reader", row);
-    target.innerHTML = `<form class="diary-form"><div class="readfield"><label for="diary-content">日记正文</label><textarea id="diary-content" name="content" rows="6" maxlength="100000" required>${esc(saved.content)}</textarea></div>${saveStatusHTML()}<div class="diary-actions"><button type="button" class="quiet close-diary">完成编辑</button></div></form>`;
-    const form = $("form", target);
-    const input = $("textarea", form);
-    const saver = autoSave($(".autosave-status", form), () => input.value, async (content) => {
-      if (!content.trim()) throw new Error("日记正文不能为空");
-      saved = await api(url(`/diaries/${saved.id}`), {
-        method: "PATCH",
-        body: {content, expected_revision: saved.revision},
-      });
-      details.set(saved.id, saved);
-      $(".diary-edited", row).textContent = " · 已修改";
-      const excerpt = $(".diary-excerpt", row);
-      if (excerpt) excerpt.textContent = diaryExcerpt(saved.content);
+    closeEditor = editRevisionedText($(".diary-reader", row), {
+      kind: "diary",
+      label: "日记正文",
+      path: url(`/diaries/${saved.id}`),
+      saved,
+      onSaved: (updated) => {
+        details.set(updated.id, updated);
+        $(".diary-edited", row).textContent = " · 已修改";
+        const excerpt = $(".diary-excerpt", row);
+        if (excerpt) excerpt.textContent = diaryExcerpt(updated.content);
+      },
+      onClose: (updated) => {
+        closeEditor = null;
+        show(row, updated);
+      },
     });
-    input.addEventListener("input", () => fitTextarea(input));
-    wireAutoSave(form, saver);
-    form.onsubmit = (event) => event.preventDefault();
-    closeEditor = () => {
-      saver.dispose();
-      closeEditor = null;
-      show(row, saved);
-    };
-    $(".close-diary", form).onclick = async () => {
-      if (await allowLeave()) closeEditor?.();
-    };
-    fitTextarea(input);
-    input.focus();
   }
   await load(1, read);
 }

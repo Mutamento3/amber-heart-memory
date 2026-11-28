@@ -269,6 +269,40 @@ def open_conversation_records(page):
     expect(page.locator('#summary-library')).to_have_count(0)
 
 
+def edit_instant_summary(page):
+    """Use real writes to exercise autosave and two-editor revision conflicts."""
+    entry = page.locator(".summary-entry").first
+    summary_id = entry.get_attribute("data-summary")
+    url = ORIGIN + f"/api/spaces/sample/summaries/{summary_id}"
+    original = page.request.get(url).json()["summary"]["content"]
+    summary = entry.locator(".summary-text")
+    field = entry.get_by_role("textbox", name="摘要正文")
+    status = entry.locator(".summary-form [role=status]")
+    entry.get_by_role("button", name="编辑", exact=True).click()
+    field.fill("手改后的合成摘要\n第二行原样保存。")
+    expect(status).to_have_text("已保存")
+    expect(field).to_be_focused()
+    entry.get_by_role("button", name="完成编辑", exact=True).click()
+    expect(summary).to_contain_text("手改后的合成摘要")
+    entry.get_by_role("button", name="编辑", exact=True).click()
+
+    csrf = page.request.get(ORIGIN + "/api/session").json()["csrf"]
+    headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
+    current = page.request.get(url).json()["summary"]
+    other_edit = page.request.patch(url, headers=headers,
+                                    data={"content": original, "expected_revision": current["revision"]})
+    assert other_edit.ok, other_edit.text()
+    field.fill("本地尚未保存的编辑")
+    expect(status).to_contain_text("请核对最新版本")
+    expect(field).to_have_value("本地尚未保存的编辑")
+    finish = entry.get_by_role("button", name="完成编辑", exact=True)
+    confirm_action(page, finish.click, "尚未保存", accept=False)
+    expect(field).to_have_value("本地尚未保存的编辑")
+    confirm_action(page, finish.click, "尚未保存", accept=True)
+    page.reload()
+    expect(summary).to_have_text(original)
+
+
 def conversation_scrollback(page):
     """Recall history opens at the newest turn and loads older turns on scroll-up."""
     def turn(position, day):
@@ -463,6 +497,7 @@ def hosted_pages(page, capture):
     expect(library.locator(".summary-text").first).to_contain_text("合成二次摘要")
     expect(library.locator(".summary-retention")).to_have_text("只保留最近 15 天，更早的日子可以看日记。")
     capture("summaries-iphone-webkit.png")
+    edit_instant_summary(page)
     page.get_by_role('link', name='设置', exact=True).click()
     persona = page.locator('#persona-text')
     persona.fill('你是一位耐心的助手。\n尊重用户的表达，用清楚、自然的话交流。')

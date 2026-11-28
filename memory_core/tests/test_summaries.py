@@ -13,7 +13,7 @@ from memory_core.conversations.conversations import ConversationStore, Conversat
 from memory_core.storage.db import connect
 from memory_core.storage.install import install, MIGRATIONS, catalog_fingerprint
 from memory_core.storage.space import Participant, SpaceConfiguration
-from memory_core.daily.summaries import SummaryStore, active_summaries
+from memory_core.daily.summaries import SummaryConflict, SummaryStore, active_summaries
 from memory_core.daily.summary_policy import SummarySettings
 from memory_core.tests.support import DatabaseTestCase
 
@@ -518,6 +518,45 @@ class SummaryTests(DatabaseTestCase):
                 ).fetchone()["n"],
                 0,
             )
+
+    def test_edited_summary_invalidates_inflight_rollup_and_is_used_in_new_plan(self):
+        self.summary = SummaryStore(self.app, "one", SummarySettings(
+            trigger_messages=4, retain_turns=1, rollup_trigger=3
+        ))
+        self.seed(4)
+        first = self.save_next("原始一级摘要")
+        self.save_next("第二份一级摘要")
+        self.save_next("第三份一级摘要")
+        old_plan = self.summary.next_plan(self.day)
+        self.assertIn("原始一级摘要", old_plan["material"])
+
+        edited = self.summary.edit(first, "手改的一级摘要", 1)
+        self.assertEqual(edited, dict(id=first, content="手改的一级摘要", revision=2))
+        self.assertIsNone(self.summary.save(old_plan, dict(content="过期合并结果", model="synthetic")))
+        new_plan = self.summary.next_plan(self.day)
+        self.assertEqual(new_plan["level"], 2)
+        self.assertIn("手改的一级摘要", new_plan["material"])
+        self.assertNotIn("原始一级摘要", new_plan["material"])
+        self.assertIsNotNone(self.summary.save(new_plan, dict(content="新合并结果", model="synthetic")))
+        with self.assertRaises(SummaryConflict):
+            self.summary.edit(first, "已合入的摘要不能修改", 2)
+
+    def test_existing_summary_starts_at_revision_one_after_upgrade(self):
+        with connect(self.owner) as c:
+            c.execute("DROP SCHEMA memory_core CASCADE")
+        install(self.owner, self.settings, target_version=34)
+        self.config.configure("one", Participant("小岚"), Participant("助手"))
+        self.store = ConversationStore(self.app, "one")
+        self.summary = SummaryStore(self.app, "one")
+        records = self.seed(14)
+        identifier = self.save_next("升级前已保存的摘要")
+        install(self.owner, self.settings)
+        with connect(self.app) as c:
+            old, = active_summaries(c, "one", self.day)
+        self.assertEqual((old["id"], old["content"], old["revision"]),
+                         (identifier, "升级前已保存的摘要", 1))
+        self.assertCountEqual(old["covered_turn_ids"], [r["turn_id"] for r in records[:12]])
+        self.assertEqual(SummaryStore(self.app, "one").edit(identifier, "升级后修改", 1)["revision"], 2)
 
     def test_v11_upgrade_repeat_and_failure_leave_data_and_schema_unchanged(self):
         with connect(self.owner) as c:

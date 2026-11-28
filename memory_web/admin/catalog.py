@@ -14,7 +14,8 @@ from memory_core.cards.review_policy import ApprovalSettings, MANUAL_REVIEW
 from memory_core.daily.daily_policy import DailySettings
 from memory_core.storage.schema import (DELAYED_APPROVAL_VERSION, ARCHIVE_VERSION, TOPIC_SUMMARY_VERSION,
                                 IMAGE_DESCRIPTION_VERSION, SUMMARY_VERSION, DIARY_VERSION,
-                                RECENT_NOTES_VERSION, CORE_MEMORY_VERSION, IMPORT_VERSION, SUMMARY_PROGRESS_VERSION)
+                                RECENT_NOTES_VERSION, CORE_MEMORY_VERSION, IMPORT_VERSION, SUMMARY_PROGRESS_VERSION,
+                                SUMMARY_EDIT_VERSION)
 from memory_core.lifecycle.archive_policy import ArchiveSettings, receipt_health
 from memory_core.cards.drafts import DraftStore, context_for
 from memory_core.imports.imports import direct_import_draft_filter
@@ -515,17 +516,17 @@ class Catalog:
 
     def summaries(self, space, page, size):
         with connect(self.dsn) as c:
-            if not c.execute(
-                "SELECT to_regclass('memory_core.conversation_summaries') AS value"
-            ).fetchone()["value"]:
+            version = c.execute("SELECT version FROM memory_core.installation").fetchone()["version"]
+            if version < SUMMARY_VERSION:
                 return dict(items=[], total=0, page=page, size=size)
+            revision = "revision" if version >= SUMMARY_EDIT_VERSION else "NULL AS revision"
             total = c.execute(
                 "SELECT count(*) AS n FROM memory_core.conversation_summaries WHERE bot_id=%s AND merged_into_id IS NULL AND content_deleted_at IS NULL",
                 (space,),
             ).fetchone()["n"]
             items = c.execute(
                 """SELECT id,business_date,level,start_at,end_at,created_at,content_deleted_at,merged_into_id,
-                CASE WHEN content_deleted_at IS NULL THEN content END AS content
+                content,""" + revision + """
                 FROM memory_core.conversation_summaries WHERE bot_id=%s AND merged_into_id IS NULL
                 AND content_deleted_at IS NULL ORDER BY id DESC LIMIT %s OFFSET %s""",
                 (space, size, (page - 1) * size),

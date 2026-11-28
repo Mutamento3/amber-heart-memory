@@ -386,9 +386,9 @@ button.conversation-summary-failed { min-width: 28px; min-height: 28px; padding:
 .diary-reader h3 { font-size: 14px; margin: 0 0 8px; }
 .diary-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .diary-edited { font-size: 10px; color: var(--muted); }
-.diary-actions { display: flex; justify-content: flex-end; gap: 14px; margin-top: 10px; }
-.diary-actions button { color: #98565e; font-size: 12px; }
-.diary-form textarea { min-height: 180px; }
+.diary-actions, .summary-actions { display: flex; justify-content: flex-end; gap: 14px; margin-top: 10px; }
+.diary-actions button, .summary-actions button { color: #98565e; font-size: 12px; }
+.diary-form textarea, .summary-form textarea { min-height: 180px; }
 
 .card-actions { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 12px; }
 .card-actions button { flex: none; width: auto; font-size: 12px; }

@@ -76,6 +76,7 @@ python3 -m memory_web
 | 访问钥匙 | `GET` 查看、`POST` 生成新钥匙（旧的作废）、`DELETE` 作废 `/api/spaces/{space}/access-key` | — |
 | 读取及时摘要进度和状态 | `GET /api/spaces/{space}/summaries/status` | — |
 | 重试失败的及时摘要 | `POST /api/spaces/{space}/summaries/retry` | `attempt_id`（状态接口返回的 `attempt.id`） |
+| 修改及时摘要正文 | `PATCH /api/spaces/{space}/summaries/{summary_id}` | `content`、`expected_revision`（摘要列表或详情返回的 `revision`） |
 
 各接口的细节见下文对应章节。
 
@@ -326,7 +327,11 @@ Kelivo 可按上述方式配置；本批已用官方 Python SDK 客户端完成�
 
 30,000 字符是异常长原话的兜底预算，正常聊天仍由 28 条触发摘要；它不是 token 数，也不是整个模型上下文的上限。摘要失败或后台尚未完成时，若原话仍超预算，本轮只带预算内的最近完整轮次，并在补充上下文中明确说明省略了多少轮，涉及细节时请 AI 向空间设置中的用户确认；当前用户消息保持完整。单轮原话本身超预算时整轮省略，不截半句话。被省略轮次仍在数据库，`context_manifest.history_omitted` 保存其编号和数量，对话页显示同一事实；摘要结果、人设、召回和当前消息不在这个原话预算内，实际型号窗口需要另行核对。
 
-摘要与原话沿用同一空间保留策略（默认 30 天、可永久）。`ConversationStore.expire` 从覆盖原话的时间判断，清空到期一级及关联二次摘要正文，保留编号、合并与覆盖墓碑；工具、原话及其原料副本仍按原有事务一起清理。每日清理通过下方的任务表调度。只读管理接口为 `GET /api/spaces/{space}/summaries` 和 `GET /api/spaces/{space}/summaries/{id}`，普通空间钥匙不能进入管理接口。
+摘要与原话沿用同一空间保留策略（默认 30 天、可永久）。`ConversationStore.expire` 从覆盖原话的时间判断，清空到期一级及关联二次摘要正文，保留编号、合并与覆盖墓碑；工具、原话及其原料副本仍按原有事务一起清理。每日清理通过下方的任务表调度。
+
+从概览进入“及时摘要”，点击一份摘要下面的“编辑”。和日记一样，停笔或离开输入框时自动保存，点“完成编辑”回到阅读。核心迁移 035 为摘要增加 `revision`，已有摘要从 1 开始。列表 `GET /api/spaces/{space}/summaries` 返回每条的修订，详情 `GET /api/spaces/{space}/summaries/{summary_id}` 从 `summary.revision` 读取。保存使用 `PATCH /api/spaces/{space}/summaries/{summary_id}`，提交非空 `content`（最多 100,000 字符）和 `expected_revision`，返回 `id`、保存后的 `content` 和新的 `revision`。可修改当前独立展示的一级或二次摘要。修订过期、该摘要已合入其他摘要或正文已清理时返回 409，页面保留输入并提示核对最新版。
+
+下一轮聊天注入保存后的摘要，本轮工具续接继续使用首次冻结的内容。后续三合一使用修改后的一级正文；合并生成期间源摘要发生编辑时，旧结果会被丢弃。删除聊天触发摘要重写时，重写结果取代受影响的手改内容。
 
 
 ### 日记与每日任务（3E）

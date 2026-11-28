@@ -42,10 +42,12 @@ from memory_core.storage.schema import (
     IMAGE_DESCRIPTION_VERSION,
     RECENT_NOTES_VERSION,
     IMPORT_VERSION,
+    SUMMARY_EDIT_VERSION,
     SUMMARY_VERSION,
 )
 from memory_core.storage.config import Settings as CoreSettings
 from memory_core.daily.diaries import DiaryConflict, DiaryStore
+from memory_core.daily.summaries import SummaryConflict, SummaryStore
 from memory_core.conversations.conversations import ConversationConflict, ConversationStore
 from memory_core.models.http_models import HTTPRecallModels
 from memory_core.cards.review import ReviewStore
@@ -144,7 +146,7 @@ class PeriodNotesPatch(Body):
     period_notes_enabled: StrictBool
 
 
-class DiaryPatch(Body):
+class RevisionedTextPatch(Body):
     expected_revision: Annotated[StrictInt, Field(gt=0)]
     content: Annotated[StrictStr, Field(min_length=1, max_length=100000)]
 
@@ -277,7 +279,8 @@ def create_app(
     attach_hooks(app, version)
 
     @app.exception_handler(DiaryConflict)
-    async def diary_conflict(request, exc):
+    @app.exception_handler(SummaryConflict)
+    async def text_revision_conflict(request, exc):
         return JSONResponse({"detail": str(exc)}, 409)
 
     @app.exception_handler(KeyConfigurationError)
@@ -614,7 +617,7 @@ def create_app(
         return catalog.diary(space, diary_id)
 
     @app.patch("/api/spaces/{space}/diaries/{diary_id}")
-    def edit_diary(space: str, diary_id: PositiveID, body: DiaryPatch):
+    def edit_diary(space: str, diary_id: PositiveID, body: RevisionedTextPatch):
         require_space(space)
         return DiaryStore(settings.dsn, space).edit(
             diary_id, body.content, body.expected_revision
@@ -624,6 +627,15 @@ def create_app(
     def summary(space: str, summary_id: PositiveID):
         require_space(space)
         return catalog.summary(space, summary_id)
+
+    @app.patch("/api/spaces/{space}/summaries/{summary_id}")
+    def edit_summary(space: str, summary_id: PositiveID, body: RevisionedTextPatch):
+        require_space(space)
+        if version < SUMMARY_EDIT_VERSION:
+            raise HTTPException(409, "请先升级记忆核心以修改及时摘要")
+        return SummaryStore(settings.dsn, space).edit(
+            summary_id, body.content, body.expected_revision
+        )
 
     @app.put("/api/spaces/{space}/participants")
     def participants(space: str, body: Configure):

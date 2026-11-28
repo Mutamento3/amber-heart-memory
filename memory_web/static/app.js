@@ -82,6 +82,38 @@ const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [
   ...parent.querySelectorAll(selector),
 ];
+function uuidV4() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4.
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 9562 variant.
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
+}
+async function copyText(text, container = document.body) {
+  try {
+    if (typeof navigator.clipboard?.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch { /* Fall back when the browser denies clipboard access. */ }
+  const previousFocus = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.tabIndex = -1;
+  textarea.style.cssText = "position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; font-size: 16px;";
+  // A modal makes everything outside it inert, including a textarea in the body.
+  container.append(textarea);
+  try {
+    textarea.focus({preventScroll: true});
+    textarea.select();
+    if (!document.execCommand("copy")) throw new Error("复制失败");
+  } finally {
+    textarea.remove();
+    previousFocus?.focus({preventScroll: true});
+  }
+}
 const encodedSpace = () => encodeURIComponent(state.space);
 const url = (suffix) => `/api/spaces/${encodedSpace()}${suffix}`;
 const NAV_PAGES = ["overview", "review", "memories", "conversations", "settings"];
@@ -403,9 +435,12 @@ function dateField(label, name, value, hint) {
   return `<label class="date-field"><span class="date-control ${value ? "has-value" : ""}"><input name="${name}" type="date" value="${esc(value)}" aria-label="${esc(label)}"><span class="date-display" aria-hidden="true" data-hint="${esc(hint)}">${esc(value ? chineseDate(value) : hint)}</span></span></label>`;
 }
 function fitTextarea(textarea) {
+  // Measuring at auto height can temporarily shorten the page and clamp its scroll position.
+  const scrollY = window.scrollY;
   textarea.style.height = "auto";
   const borders = textarea.offsetHeight - textarea.clientHeight;
   textarea.style.height = textarea.scrollHeight + borders + "px";
+  window.scrollTo({top: scrollY, behavior: "instant"});
 }
 // Reflow editable text when the viewport changes (rotation or a narrower window).
 window.addEventListener("resize", () => {
@@ -1005,7 +1040,7 @@ async function openConnectGuide() {
     $$("[data-copy]", dialog).forEach((button) => (button.onclick = async () => {
       // A toast would sit behind the modal card, so the button itself answers.
       let ok = true;
-      try { await navigator.clipboard.writeText(values[Number(button.dataset.copy)]); } catch { ok = false; }
+      try { await copyText(values[Number(button.dataset.copy)], dialog); } catch { ok = false; }
       button.textContent = ok ? "已复制" : "复制失败";
       setTimeout(() => { if (button.isConnected) button.textContent = "复制"; }, 1500);
     }));
@@ -1128,7 +1163,7 @@ async function openSummary(reader, id, epoch, removeCard, read = api) {
       const payload = {expected_version: batch.version};
       if (action === "approve") {
         let key = sessionStorage.getItem(storageKey);
-        if (!key) {key = crypto.randomUUID(); sessionStorage.setItem(storageKey,key);}
+        if (!key) {key = uuidV4(); sessionStorage.setItem(storageKey,key);}
         payload.expected_policy_revision = data.policy_revision;
         payload.request_key = key;
       }
@@ -1451,7 +1486,7 @@ function renderDraft(reader, data, reloadCard, removeCard, replaceCard) {
         result.textContent = "草稿保存成功后才能收录";
         return;
       }
-      uncertain = uncertain || crypto.randomUUID();
+      uncertain = uncertain || uuidV4();
       sessionStorage.setItem(reviewStorage, uncertain);
       const actual = await api(url(`/drafts/${draft.id}/approve`), {
         method: "POST",
@@ -1848,7 +1883,7 @@ async function settingsPage(main, initialize, epoch, section, read) {
   proxyAddress.value = (state.mcpUrl || "").replace(/\/mcp\/?$/, "/v1");
   $("#copy-proxy", main).onclick = async () => {
     try {
-      await navigator.clipboard.writeText(proxyAddress.value);
+      await copyText(proxyAddress.value);
       message("接口地址已复制");
     } catch {
       proxyAddress.focus();
@@ -1944,7 +1979,7 @@ async function accessKeySection(epoch) {
         };
         $("#copy-key", target).onclick = async () => {
           try {
-            await navigator.clipboard.writeText(input.value);
+            await copyText(input.value);
             message("钥匙已复制");
           } catch {
             input.type = "text";
@@ -1995,7 +2030,7 @@ function renderMcpConnection(key) {
   $$("[data-copy-mcp]", target).forEach(button => button.onclick = async () => {
     const input = $("#" + button.dataset.copyMcp, target);
     try {
-      await navigator.clipboard.writeText(input.value);
+      await copyText(input.value);
       message("已复制");
     } catch {
       if (input.type === "password") input.type = "text";

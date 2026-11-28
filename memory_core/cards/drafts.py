@@ -46,18 +46,17 @@ def context_for(connection, space_id, *, include_persona=False):
         topics=topics,
         entity_types=ENTITY_TYPES, entity_subtypes=ENTITY_SUBTYPES, relation_types=RELATION_TYPES)
     if include_persona:
-        # Persona is selection background. Keep persisted job digests and the
-        # structure input compatible with existing drafts and imports.
+        # Persona is selection background.
         context["persona"] = policy.get("persona", "")
     return context
 
 
 def context_digest(context):
-    # Entity growth from earlier approved cards is expected during a retry.
+    # Job retries tolerate edits to free-text background and entity growth.
     stable = {
         k: v
         for k, v in context.items()
-        if k not in ("policy_revision", "known_entities")
+        if k not in ("policy_revision", "known_entities", "core_memory", "persona")
     }
     return hashlib.sha256(
         json.dumps(stable, sort_keys=True, ensure_ascii=False).encode()
@@ -322,10 +321,11 @@ class DraftStore(GraphStore):
     def structure_retry_target(self, draft_id, *, expected_version):
         self._require_structure_claims()
         with connect(self.dsn) as connection:
+            policy = read_policy(connection, self.space_id)
             draft = self._draft(connection, draft_id)
             if draft['version'] != expected_version or draft['status'] != 'structure_failed':
                 raise RevisionConflict('草稿已改变或不需要重新整理')
-            if read_policy(connection, self.space_id)['revision'] != draft['policy_revision']:
+            if policy['revision'] != draft['policy_revision']:
                 raise ExtractionConfigurationChanged('配置已改变，请先复核草稿')
             extraction = self._extraction(connection, draft['extraction_id'])
             if self._source(connection, extraction['material_id'])['deleted_at']:
@@ -354,6 +354,8 @@ class DraftStore(GraphStore):
 
     def _selection_error(self, previous, error):
         with connect(self.dsn) as connection:
+            if read_policy(connection, self.space_id)['revision'] != previous['policy_revision']:
+                raise ExtractionConfigurationChanged('模型返回时配置已改变')
             connection.execute('''UPDATE memory_core.material_extractions SET status='failed',error_code=%s,version=version+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE id=%s AND bot_id=%s AND version=%s''',
                 ('selection:'+type(error).__name__,previous['id'],self.space_id,previous['version']))
@@ -364,7 +366,11 @@ class DraftStore(GraphStore):
 
     def _claim_structure(self, draft, token, lease_seconds):
         with connect(self.dsn) as connection:
+            # Configuration saves take the policy lock before locking drafts.
+            context = context_for(connection, self.space_id)
             current = self._draft(connection, draft['id'], lock=True)
+            if draft['policy_revision'] != context['policy_revision']:
+                raise ExtractionConfigurationChanged('整理前配置已改变')
             if current['version'] != draft['version'] or current['status'] not in ('structure_pending', 'structure_failed'):
                 raise RevisionConflict('草稿已被其他任务处理，请重新读取')
             claimed = connection.execute('''UPDATE memory_core.pending_memories
@@ -375,7 +381,6 @@ class DraftStore(GraphStore):
                 RETURNING id''', (token, lease_seconds, current['id'], self.space_id)).fetchone()
             if not claimed:
                 raise StructureInProgress('这张草稿正在整理')
-            context = context_for(connection, self.space_id)
             extraction = self._extraction(connection, current['extraction_id'])
             source = self._source(connection, extraction['material_id'])
             prompt = self._render_structure_prompt(current, context, source)
@@ -453,8 +458,8 @@ class DraftStore(GraphStore):
                   AND structure_claim_token IS NULL''',
                 (error,self.space_id,draft['id'],draft['version']))
 
-    def extraction(self, extraction_id):
-        with connect(self.dsn) as connection:
+    def extraction(self, extraction_id, *, connection=None):
+        with (nullcontext(connection) if connection is not None else connect(self.dsn)) as connection:
             row = self._extraction(connection, extraction_id)
             drafts = connection.execute('SELECT * FROM memory_core.pending_memories WHERE bot_id=%s AND extraction_id=%s ORDER BY ordinal', (self.space_id,extraction_id)).fetchall()
             return {**row, 'drafts':drafts}

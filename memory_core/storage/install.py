@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 from .clock import format_timestamp
 from .config import Settings
 from .db import connect
-from .schema import LATEST_VERSION, MIGRATION_FILES, SUPPORTED_VERSIONS
+from .schema import DRAFT_POLICY_ALIGNMENT_VERSION, LATEST_VERSION, MIGRATION_FILES, SUPPORTED_VERSIONS
 
 
 MIGRATION = Path(__file__).parent.parent / "migrations" / "001_core.sql"
@@ -23,6 +23,26 @@ MIGRATIONS = MIGRATION.parent
 
 class InstallationMismatch(RuntimeError):
     """An existing installation needs explicit investigation or migration."""
+
+
+def _rebase_import_digests(connection):
+    from ..cards.drafts import context_digest, context_for
+
+    # The old hash mixed in core memory and cannot be converted. Use the
+    # settings at upgrade time as the baseline for jobs that can still run.
+    groups = connection.execute("""SELECT j.bot_id, array_agg(j.id) AS job_ids
+        FROM memory_core.import_jobs j
+        WHERE j.status IN ('preview', 'queued', 'running', 'failed')
+           OR (j.status = 'completed' AND EXISTS (
+               SELECT 1 FROM memory_core.import_items i
+               WHERE (i.job_id, i.bot_id) = (j.id, j.bot_id)
+                 AND i.selected AND i.status = 'failed'))
+        GROUP BY j.bot_id ORDER BY j.bot_id""").fetchall()
+    for group in groups:
+        space_id = group['bot_id']
+        digest = context_digest(context_for(connection, space_id))
+        connection.execute("""UPDATE memory_core.import_jobs SET context_digest=%s
+            WHERE bot_id=%s AND id=ANY(%s)""", (digest, space_id, group['job_ids']))
 
 
 def catalog_fingerprint(connection):
@@ -177,6 +197,8 @@ def install(dsn: str, settings: Settings, application_role: str = "memory_app", 
                 migration = migration.replace("__TOPIC_PRESETS__", sql.Literal(Jsonb(topic_presets())).as_string(connection))
             try:
                 connection.execute(migration)
+                if version == DRAFT_POLICY_ALIGNMENT_VERSION:
+                    _rebase_import_digests(connection)
             except psycopg.Error as exc:
                 if version == 14 and exc.sqlstate == "P4001":
                     raise InstallationMismatch(

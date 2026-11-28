@@ -548,8 +548,9 @@ class AdminTests(DatabaseTestCase):
         client = self.fixed_client(fixtures)
         self.config.configure("sample", Participant("小禾", ["新别名"]), Participant("林舟", ["阿林"]), expected_revision=1)
         self.assertEqual(self.approve(actual, client).status_code, 409)
+        latest = client.get(f"/api/spaces/sample/drafts/{actual['id']}").json()["draft"]
         body = dict(
-            expected_version=actual["version"],
+            expected_version=latest["version"],
             expected_policy_revision=2,
             payload=actual["payload"],
         )
@@ -843,7 +844,7 @@ class AdminTests(DatabaseTestCase):
         self.assertEqual(actual["status"], "pending")
         self.assertEqual(client.get("/api/spaces/sample/cards").json()["total"], 0)
 
-    def test_only_participant_changes_require_visible_reconfirmation(self):
+    def test_participant_changes_allow_approval_after_reload(self):
         self.space()
         pending, fixtures = self.ready()
         client = self.fixed_client(fixtures)
@@ -855,14 +856,13 @@ class AdminTests(DatabaseTestCase):
         self.assertEqual(client.get(path).json()["configuration_changes"], [])
         self.config.configure("sample", Participant("紫菀", ["新小名"]), Participant("林舟", ["阿林"]), expected_revision=3)
         detail = client.get(path).json()
-        self.assertEqual(detail["configuration_changes"], ["你的名字：小禾 → 紫菀", "你的又名已调整"])
-        response = self.write(path, dict(expected_version=pending["version"], expected_policy_revision=4,
-            payload=pending["payload"]), http=client)
+        self.assertEqual(detail["configuration_changes"], [])
+        self.assertEqual(detail["draft"]["policy_revision"], 4)
+        self.assertEqual(detail["draft"]["policy_snapshot"], pending["policy_snapshot"])
+        response = self.approve(detail["draft"], client)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(client.get(path).json()["configuration_changes"], [])
-        self.assertEqual(response.json()["payload"]["experience_mode"], pending["payload"]["experience_mode"])
 
-    def test_legacy_missing_snapshot_is_explained_without_invented_changes(self):
+    def test_missing_snapshot_does_not_prevent_configuration_alignment(self):
         self.space()
         item, _ = self.ready()
         self.login()
@@ -875,7 +875,9 @@ class AdminTests(DatabaseTestCase):
             "sample", Participant("新用户"), Participant("林舟"), expected_revision=1
         )
         detail = self.http.get("/api/spaces/sample/drafts/" + str(item["id"])).json()
-        self.assertIn("无法逐项还原", detail["configuration_changes"][0])
+        self.assertEqual(detail["configuration_changes"], [])
+        self.assertEqual(detail["draft"]["policy_revision"], 2)
+        self.assertIsNone(detail["draft"]["policy_snapshot"])
 
     def test_overview_counts_days_topics_recent_and_rejected_list(self):
         from datetime import date
@@ -998,13 +1000,8 @@ class AdminTests(DatabaseTestCase):
         detail = client.get(draft_path).json()
         self.assertEqual(detail["configuration_changes"], [])
         self.assertNotIn("acquaintance_date", detail["draft"]["policy_snapshot"])
-        edited = self.write(draft_path, dict(expected_version=item["version"],
-            expected_policy_revision=2, payload=item["payload"]), http=client)
-        self.assertEqual(edited.status_code, 200, edited.text)
-        actual = client.get(draft_path).json()
-        self.assertEqual(actual["configuration_changes"], [])
-        self.assertNotIn("acquaintance_date", actual["draft"]["policy_snapshot"])
-        approved = self.approve(actual["draft"], client)
+        self.assertEqual(detail["draft"]["policy_revision"], 2)
+        approved = self.approve(detail["draft"], client)
         self.assertEqual(approved.status_code, 200, approved.text)
 
 
@@ -1110,9 +1107,13 @@ class UpgradeTests(DatabaseTestCase):
         # Restore the template name required by migration 009, with a newer policy revision.
         config.edit_topic("sample", topic, expected_revision=2, name="工作与学习")
         current = self.legacy_draft("current")
+        with connect(self.owner) as connection:
+            # Before alignment, a settings save left the original revision on old drafts.
+            connection.execute("UPDATE memory_core.pending_memories SET policy_revision=1 WHERE id=%s", (old["id"],))
         install(self.owner, Settings(3))
         store = DraftStore(self.app, "sample")
         self.assertIsNone(store.get(old["id"])["policy_snapshot"])
+        self.assertEqual(store.get(old["id"])["policy_revision"], 3)
         snapshot = store.get(current["id"])["policy_snapshot"]
         self.assertEqual(
             next(t["description"] for t in snapshot["topics"] if t["id"] == topic),

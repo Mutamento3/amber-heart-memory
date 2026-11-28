@@ -13,6 +13,7 @@ from memory_core.cards.drafts import MAX_CONCURRENT_STRUCTURES, ExtractionConfig
 from memory_core.models.http_transport import ModelCallError
 from memory_core.imports.imports import IMPORT_APPROVAL_FAILED, ImportStore, import_run_lock
 from memory_core.cards.review import ReviewStore
+from memory_core.storage.space import RevisionConflict
 from ..models.extraction_model import ExtractionModel, safe_usage
 
 LOG = logging.getLogger('memory_web.imports')
@@ -172,6 +173,10 @@ class ImportJobs:
             store.defer_item(item, now=self.clock())
             return
         except Exception as error:
+            if isinstance(error, ExtractionConfigurationChanged):
+                check_lock()
+                if store.defer_item(item, now=self.clock(), require_same_context=True):
+                    return
             error_code = self._pause_code(error) or 'import_' + step + '_failed'
             LOG.warning('import_item_failed space=%s job=%s item=%s step=%s type=%s code=%s',
                 store.space_id, identifier, item['id'], step, type(error).__name__,
@@ -194,6 +199,8 @@ class ImportJobs:
                         embedder=self.embedder, embedding_model=self.embedding_model, guard=lambda _: check_lock())
                 except Exception as exc:
                     check_lock()
+                    if isinstance(exc, RevisionConflict) and review.policy()['revision'] != draft['policy_revision']:
+                        raise ExtractionConfigurationChanged('导入收录期间配置已改变') from exc
                     LOG.warning('import_approval_failed space=%s draft=%s code=%s',
                         store.space_id, draft['id'], getattr(exc,'code',None) or type(exc).__name__)
                     store.approval_failed(draft)

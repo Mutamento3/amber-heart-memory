@@ -77,7 +77,7 @@ class ReviewClockTests(DatabaseTestCase):
             self.store.edit(current['id'],current['payload'],expected_version=current['version'],expected_policy_revision=current['policy_revision'])
         self.assertEqual(self.store.get(current['id'])['review_ready_at'],saved['review_ready_at'])
 
-    def test_switch_preserves_wait_clock_and_never_bypasses_older_semantic_changes(self):
+    def test_switch_and_extraction_rules_align_revision_without_resetting_wait_clock(self):
         draft=self.ready()
         old=draft['review_ready_at']
         updated=self.config.set_auto_approval('example',expected_revision=1,enabled=False)
@@ -89,7 +89,9 @@ class ReviewClockTests(DatabaseTestCase):
             self.config.set_auto_approval('example',expected_revision=1,enabled=True)
         self.config.set_extraction_rules('example',expected_revision=2,minimum_importance=9)
         self.config.set_auto_approval('example',expected_revision=3,enabled=True)
-        self.assertEqual(self.store.get(draft['id'])['policy_revision'],2)
+        current=self.store.get(draft['id'])
+        self.assertEqual(current['policy_revision'],4)
+        self.assertEqual(current['review_ready_at'],old)
 
 
 class ApprovalMigrationTests(DatabaseTestCase):

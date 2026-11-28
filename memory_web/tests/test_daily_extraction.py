@@ -534,30 +534,21 @@ class DailyExtractionTests(DatabaseTestCase):
         with connect(self.app) as c:
             self.assertEqual(c.execute('SELECT count(*) AS n FROM memory_core.memory_items').fetchone()['n'],0)
 
-    def test_core_memory_change_leaves_due_draft_for_a_person_who_can_approve_it(self):
+    def test_core_memory_change_keeps_draft_on_automatic_approval_schedule(self):
         self.seed()
         self.tick()
         with connect(self.app) as c:
             draft=c.execute('SELECT * FROM memory_core.pending_memories').fetchone()
             revision=read_policy(c,'one')['revision']
-        # Core memory is extraction context, so the stale draft cannot be reconfirmed automatically.
         self.config.set_core_memory('one',expected_revision=revision,core_memory='合成核心记忆：喜欢植物。')
+        aligned=DraftStore(self.app,'one').get(draft['id'])
+        self.assertEqual(aligned['policy_revision'],revision+1)
+        self.assertEqual(aligned['review_ready_at'],draft['review_ready_at'])
         self.now=ApprovalSettings().scheduled_at(draft['review_ready_at'],self.core,self.jobs.policy)+timedelta(seconds=1)
         self.tick()
         task=self.approval_task()
-        self.assertEqual((task['state'],task['result']['manual']),('done',[draft['id']]))
-        with connect(self.app) as c:
-            policy=read_policy(c,'one')
-            overview=self.jobs.approval_policy.overview(c,'one',policy,self.core,self.jobs.policy,self.now)
-        self.assertEqual((overview['manual_count'],overview['ready_count'],overview['overdue']),(1,0,False))
-        # The review page saves under the current settings first; saving clears the mark.
-        saved=DraftStore(self.app,'one').edit(draft['id'],draft['payload'],expected_version=draft['version'],
-            expected_policy_revision=policy['revision'])
-        self.assertIsNone(saved['error_code'])
-        result=ReviewStore(self.app,'one').approve(saved['id'],expected_version=saved['version'],
-            expected_policy_revision=policy['revision'],request_key='human-after-core-memory',
-            embedder=self.embedder,embedding_model='synthetic-embedding')
-        self.assertEqual(result['status'],'approved')
+        self.assertEqual((task['state'],task['result']['manual'],task['result']['approved']),('done',[],1))
+        self.assertEqual(ReviewStore(self.app,'one').get(draft['id'])['status'],'approved')
 
     def test_two_workers_share_lock_for_due_approval(self):
         from threading import Event
@@ -779,9 +770,7 @@ class DailyExtractionTests(DatabaseTestCase):
             self.tick()
         self.assertEqual(self.task()["result"]["pending_count"], 1)
 
-    def test_semantic_setting_change_waits_for_review_and_terminal_drafts_finish_job(
-        self,
-    ):
+    def test_extraction_setting_change_allows_daily_structure_retry(self):
         self.responses.failures["structure"] = 1
         self.seed()
         self.tick()
@@ -790,21 +779,11 @@ class DailyExtractionTests(DatabaseTestCase):
         )
         self.now += timedelta(minutes=6)
         self.tick()
-        self.assertEqual(
-            self.task()["last_error_code"], "extraction_configuration_changed"
-        )
-        with connect(self.app) as c:
-            draft = c.execute(
-                "SELECT id,version FROM memory_core.pending_memories"
-            ).fetchone()
-        ReviewStore(self.app, "one").reject(
-            draft["id"], expected_version=draft["version"]
-        )
-        self.now += timedelta(minutes=6)
-        self.tick()
         self.assertEqual(self.task()["state"], "done")
-        self.assertEqual(self.task()["result"]["added_count"], 0)
-        self.assertEqual(len(self.responses.calls), 2)
+        with connect(self.app) as c:
+            draft = c.execute("SELECT status,policy_revision FROM memory_core.pending_memories").fetchone()
+        self.assertEqual(draft, dict(status="pending", policy_revision=2))
+        self.assertEqual(len(self.responses.calls), 3)
 
     def test_diary_failure_is_attempted_first_and_does_not_block_card_job(self):
         self.diary.fail = True

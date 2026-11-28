@@ -9,7 +9,10 @@ from pathlib import Path
 import psycopg
 
 from .db import connect
-from .schema import ACQUAINTANCE_DATE_VERSION, CONVERSATION_VERSION, GRAPH_VERSION, TOPIC_DETAILS_VERSION, TOPIC_PRESET_VERSION, SUPPORTED_VERSIONS
+from .schema import (
+    ACQUAINTANCE_DATE_VERSION, CONVERSATION_VERSION, DRAFT_VERSION, GRAPH_VERSION,
+    SUPPORTED_VERSIONS, TOPIC_DETAILS_VERSION, TOPIC_PRESET_VERSION, TOPIC_SUMMARY_VERSION,
+)
 
 _UNSET = object()
 
@@ -206,6 +209,7 @@ class SpaceConfiguration:
                             (space_id,topic["name"],topic.get("is_fallback",False)))
             if previous is not None:
                 self._reindex_space(connection,space_id,ignored_terms)
+                self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
     def _validate_acquaintance_date(self, value, version):
@@ -229,6 +233,7 @@ class SpaceConfiguration:
                 SET acquaintance_date=%s,revision=revision+1,
                     updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s""",
                 (acquaintance_date, space_id))
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
     def set_persona(self, space_id, *, expected_revision, persona):
@@ -245,6 +250,7 @@ class SpaceConfiguration:
             connection.execute("""UPDATE memory_core.space_policies SET persona=%s,revision=revision+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s""",
                 (persona if persona.strip() else "", space_id))
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
     def set_review_mode(self, space_id, *, expected_revision, review_mode):
@@ -267,6 +273,7 @@ class SpaceConfiguration:
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s""",
                 (review_mode, space_id),
             )
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
 
@@ -275,13 +282,14 @@ class SpaceConfiguration:
         if type(enabled) is not bool:
             raise ValueError('到期自动入库开关必须是布尔值')
         with connect(self.dsn) as connection:
-            if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] < DELAYED_APPROVAL_VERSION:
+            version = connection.execute('SELECT version FROM memory_core.installation').fetchone()['version']
+            if version < DELAYED_APPROVAL_VERSION:
                 raise ValueError('到期自动入库需要先升级记忆核心到版本 16')
             if not self._lock(connection,space_id,expected_revision):
                 raise ValueError('空间尚未配置')
             connection.execute('''UPDATE memory_core.space_policies SET auto_approve_enabled=%s,revision=revision+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s''', (enabled,space_id))
-            self._advance_switch_revision(connection, space_id, expected_revision)
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection,space_id)
 
     def set_period_notes(self, space_id, *, expected_revision, enabled):
@@ -289,29 +297,28 @@ class SpaceConfiguration:
         if type(enabled) is not bool:
             raise ValueError('月经周期开关必须是布尔值')
         with connect(self.dsn) as connection:
-            if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] < PERIOD_NOTES_SWITCH_VERSION:
+            version = connection.execute('SELECT version FROM memory_core.installation').fetchone()['version']
+            if version < PERIOD_NOTES_SWITCH_VERSION:
                 raise ValueError(f'月经周期开关需要先升级记忆核心到版本 {PERIOD_NOTES_SWITCH_VERSION}')
             if not self._lock(connection,space_id,expected_revision):
                 raise ValueError('空间尚未配置')
             connection.execute('''UPDATE memory_core.space_policies SET period_notes_enabled=%s,revision=revision+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s''', (enabled,space_id))
-            self._advance_switch_revision(connection, space_id, expected_revision)
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection,space_id)
 
     @staticmethod
-    def _advance_switch_revision(connection, space_id, expected_revision):
-        from .schema import TOPIC_SUMMARY_VERSION
-        # Only a switch changed: advance current drafts, never silently
-        # accept an older semantic configuration or reset the waiting clock.
-        connection.execute('''UPDATE memory_core.pending_memories SET policy_revision=%s,version=version+1
-            WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','structure_pending','structure_failed')''',
-            (expected_revision+1,space_id,expected_revision))
-        connection.execute('''UPDATE memory_core.material_extractions SET policy_revision=%s,version=version+1
-            WHERE bot_id=%s AND policy_revision=%s''',(expected_revision+1,space_id,expected_revision))
-        if connection.execute('SELECT version FROM memory_core.installation').fetchone()['version'] >= TOPIC_SUMMARY_VERSION:
+    def _align_unfinished_revisions(connection, space_id, schema_version, revision):
+        # Keep the review clock and the snapshot of how each draft was generated.
+        if schema_version >= DRAFT_VERSION:
+            connection.execute('''UPDATE memory_core.pending_memories SET policy_revision=%s,version=version+1
+                WHERE bot_id=%s AND status IN ('pending','structure_pending','structure_failed')''',
+                (revision, space_id))
+            connection.execute('''UPDATE memory_core.material_extractions SET policy_revision=%s,version=version+1
+                WHERE bot_id=%s AND status IN ('pending','selected','failed')''', (revision, space_id))
+        if schema_version >= TOPIC_SUMMARY_VERSION:
             connection.execute('''UPDATE memory_core.topic_summary_batches SET policy_revision=%s,version=version+1
-                WHERE bot_id=%s AND policy_revision=%s AND status IN ('pending','generating','failed')''',
-                (expected_revision+1,space_id,expected_revision))
+                WHERE bot_id=%s AND status IN ('pending','generating','failed')''', (revision, space_id))
 
     def edit_topic(self, space_id, topic_id, *, expected_revision, name=None, summary_eligible=None, description=None):
         with connect(self.dsn) as connection:
@@ -343,6 +350,7 @@ class SpaceConfiguration:
             connection.execute("UPDATE memory_core.space_policies SET revision=revision+1 WHERE bot_id=%s", (space_id,))
             if name is not None and name.strip() != topic['name']:
                 self._reindex_space(connection,space_id,policy['ignored_terms'])
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
     def set_core_memory(self, space_id, *, expected_revision, core_memory):
@@ -361,6 +369,7 @@ class SpaceConfiguration:
             connection.execute('''UPDATE memory_core.space_policies SET core_memory=%s,revision=revision+1,
                 updated_at=memory_core.format_timestamp(CURRENT_TIMESTAMP) WHERE bot_id=%s''',
                 (core_memory if core_memory.strip() else '', space_id))
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection, space_id)
 
     def set_extraction_rules(self, space_id, *, expected_revision, minimum_importance=None, daily_limit=None):
@@ -375,6 +384,8 @@ class SpaceConfiguration:
             connection.execute('''UPDATE memory_core.space_policies SET minimum_importance=%s,daily_limit=%s,
                 revision=revision+1 WHERE bot_id=%s''', (minimum_importance if minimum_importance is not None else policy['minimum_importance'],
                 daily_limit if daily_limit is not None else policy['daily_limit'],space_id))
+            version = connection.execute('SELECT version FROM memory_core.installation').fetchone()['version']
+            self._align_unfinished_revisions(connection, space_id, version, expected_revision + 1)
             return read_policy(connection,space_id)
 
 

@@ -668,9 +668,41 @@ class WebImportTests(DatabaseTestCase):
         self.assertEqual(retried['progress']['structured_cards'],1)
         self.assertEqual([stage for stage,_ in self.responses.calls],['selection','structure','structure'])
 
+    def test_saves_during_selection_and_structure_do_not_pause_import(self):
+        config = SpaceConfiguration(self.owner)
+
+        def respond(path, body):
+            response = self.responses.respond(path, body)
+            stages = [stage for stage, _ in self.responses.calls]
+            if stages == ['selection']:
+                config.set_core_memory('one', expected_revision=1, core_memory='筛选期间保存的核心记忆。')
+            elif stages == ['selection', 'selection', 'structure']:
+                config.set_persona('one', expected_revision=2, persona='整理期间保存的人设。')
+            return response
+
+        self.server.hook = respond
+        response = self.upload()
+        endpoint = self.path + '/' + response.json()['id']
+        self.assertEqual(self.post(endpoint + '/confirm').json()['status'], 'queued')
+        self.drain()
+
+        done = self.http.get(endpoint).json()
+        self.assertEqual((done['status'], done['progress']['processed'], done['progress']['failed']), ('completed', 1, 0))
+        self.assertIsNone(done['error_code'])
+        self.assertEqual([stage for stage, _ in self.responses.calls], ['selection', 'selection', 'structure', 'structure'])
+        draft, = ImportStore(self.app, 'one').list()
+        self.assertEqual((draft['status'], draft['policy_revision']), ('pending', 3))
+
     def test_direct_import_uses_review_pipeline_and_exposes_retained_original(self):
+        config = SpaceConfiguration(self.owner)
+
         class Embedder:
+            saved = False
+
             def embed(self,text):
+                if not self.saved:
+                    config.set_core_memory('one', expected_revision=1, core_memory='直接收录期间保存的核心记忆。')
+                    self.saved = True
                 return [1,0,0]
         original='我和合成助手商量，周末练习陶艺。'
         rewritten='合成读者和合成助手商定周末练习陶艺。'
@@ -687,6 +719,7 @@ class WebImportTests(DatabaseTestCase):
         self.assertTrue(self.post(endpoint+'/confirm',{'auto_approve':False}).json()['auto_approve'])
         self.drain()
         self.assertEqual(self.http.get(endpoint).json()['status'],'completed')
+        self.assertEqual([stage for stage, _ in self.responses.calls], ['structure'])
         store=ImportStore(self.app,'one')
         draft=store.list()[0]
         self.assertEqual(draft['status'],'approved')

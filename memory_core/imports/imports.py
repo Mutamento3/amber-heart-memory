@@ -366,12 +366,12 @@ class ImportStore(DraftStore):
             business_date=item['business_date'],connection=c)
 
     def resume(self, item):
-        extraction=self.extraction(item['extraction_id'])
         with connect(self.dsn) as c:
             current=context_for(c,self.space_id)
+            extraction=self.extraction(item['extraction_id'],connection=c)
         if context_digest(current)!=item['context_digest']:
             raise ExtractionConfigurationChanged('导入期间设置已改变')
-        if current['policy_revision']!=extraction['policy_revision']:
+        if extraction['status']!='complete' and current['policy_revision']!=extraction['policy_revision']:
             self.reconfirm_extraction(extraction['id'],expected_version=extraction['version'],
                 expected_policy_revision=current['policy_revision'],unchanged_context_digest=item['context_digest'])
         return extraction
@@ -386,10 +386,13 @@ class ImportStore(DraftStore):
             else:
                 self._settle(c,job,timestamp)
 
-    def defer_item(self, item, *, now):
+    def defer_item(self, item, *, now, require_same_context=False):
         with connect(self.dsn) as c:
-            self._job(c,item['job_id'],lock=True)
+            job = self._job(c,item['job_id'],lock=True)
+            if require_same_context and context_digest(context_for(c,self.space_id)) != job['context_digest']:
+                return False
             self._set_item_result(c,item,'pending',None,format_timestamp(now,self.settings),previous='running')
+            return True
 
     def _set_item_result(self, c, item, status, error, timestamp, *, previous='pending'):
         c.execute('''UPDATE memory_core.import_items SET status=%s,error_code=%s,updated_at=%s

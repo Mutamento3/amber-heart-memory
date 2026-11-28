@@ -38,10 +38,12 @@ class CoreMemoryUpgradeTests(DatabaseTestCase):
             self.assertFalse(any(LEGACY_COLUMN in row['prosrc'] for row in functions))
             before = context_for(c, 'one')
         SpaceConfiguration(self.owner).set_core_memory('one', expected_revision=1, core_memory='更新后的约定')
+        SpaceConfiguration(self.owner).set_persona('one', expected_revision=2, persona='更新后的人设')
         with connect(self.app) as c:
-            after = context_for(c, 'one')
-        self.assertNotEqual(context_digest(before), context_digest(after))
+            after = context_for(c, 'one', include_persona=True)
+        self.assertEqual(context_digest(before), context_digest(after))
         self.assertEqual(after['core_memory'], '更新后的约定')
+        self.assertEqual(after['persona'], '更新后的人设')
 
     def test_oversized_legacy_text_stops_upgrade_without_losing_original(self):
         original = ['甲' * 3000, '乙' * 2000]

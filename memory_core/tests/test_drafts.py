@@ -295,7 +295,8 @@ class DraftTests(DatabaseTestCase):
         with self.assertRaises(RevisionConflict): self.store.reject(draft['id'],expected_version=draft['version'])
         self.config.set_core_memory('example',expected_revision=1,core_memory='Visible fact')
         with self.assertRaises(RevisionConflict): self.store.edit(draft['id'],payload,expected_version=edited['version'],expected_policy_revision=1)
-        edited = self.store.edit(draft['id'],payload,expected_version=edited['version'],expected_policy_revision=2)
+        latest = self.store.get(draft['id'])
+        edited = self.store.edit(draft['id'],payload,expected_version=latest['version'],expected_policy_revision=2)
         self.assertEqual(edited['policy_revision'],2)
         self.store.reject(draft['id'],expected_version=edited['version'])
         self.config.configure('other',Participant('Other User'),Participant('Other Assistant'))
@@ -401,13 +402,13 @@ class DraftTests(DatabaseTestCase):
         install(self.owner,Settings(768),target_version=4)
         with connect(self.owner) as connection: self.assertEqual(catalog_fingerprint(connection),expected)
 
-    def test_explicit_reconfirm_after_configuration_change(self):
+    def test_unstarted_extraction_uses_new_rules_without_reconfirmation(self):
         extraction=self.submit()
         self.config.set_extraction_rules('example',expected_revision=1,minimum_importance=8)
+        current=self.store.extraction(extraction)
+        self.assertEqual((current['policy_revision'],current['version']),(2,2))
         model=self.models(extraction)
-        with self.assertRaises(RevisionConflict): self.store.extract(extraction,selector=model,structurer=model)
         with self.assertRaises(RevisionConflict): self.store.reconfirm_extraction(extraction,expected_version=1,expected_policy_revision=1)
-        self.store.reconfirm_extraction(extraction,expected_version=1,expected_policy_revision=2)
         self.assertEqual(self.store.extract(extraction,selector=model,structurer=model)['status'],'complete')
 
     def test_second_step_gets_evidence_times_separate_from_business_day(self):

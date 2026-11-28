@@ -13,6 +13,7 @@ from memory_core.storage.db import connect
 from memory_core.imports.import_formats import parse_upload
 from memory_core.imports.imports import ImportStore, import_run_lock
 from memory_core.storage.install import install
+from memory_core.cards.drafts import DraftStore
 from memory_core.cards.review import ReviewStore
 from memory_core.storage.space import Participant, RevisionConflict, SpaceConfiguration
 from memory_core.tests.support import DatabaseTestCase
@@ -287,17 +288,37 @@ class ImportStoreTests(DatabaseTestCase):
     def test_configuration_change_pauses_without_calling_models_then_can_resume(self):
         job=self.upload()
         self.store.confirm(job['id'],now=self.now)
-        self.config.set_core_memory('one',expected_revision=1,core_memory='合成的设置变动。')
+        self.config.set_extraction_rules('one',expected_revision=1,minimum_importance=8)
         with self.assertRaises(RevisionConflict):
             self.store.prepare_next(job['id'],now=self.now)
         self.store.fail_job(job['id'],'import_configuration_changed',now=self.now)
         with self.assertRaises(RevisionConflict):
             self.store.retry(job['id'],now=self.now)
         self.assertEqual(self.selector.calls,0)
-        self.config.set_core_memory('one',expected_revision=2,core_memory='')
+        self.config.set_extraction_rules('one',expected_revision=2,minimum_importance=7)
         self.store.retry(job['id'],now=self.now)
         self.process(job['id'])
         self.assertEqual(self.store.get(job['id'])['status'],'completed')
+        self.assertEqual(self.selector.calls,1)
+
+    def test_background_changes_allow_import_confirmation_and_failed_item_retry(self):
+        job=self.upload()
+        self.config.set_core_memory('one',expected_revision=1,core_memory='预览后写下的核心记忆。')
+        self.store.confirm(job['id'],now=self.now)
+        self.structurer.fail=True
+        self.process(job['id'])
+        failed=self.store.list()[0]
+        self.assertEqual(failed['status'],'structure_failed')
+        self.config.set_persona('one',expected_revision=2,persona='重试前保存的人设。')
+        drafts=DraftStore(self.app,'one')
+        current=drafts.get(failed['id'])
+        self.assertEqual(current['policy_revision'],3)
+        self.assertEqual(self.store.structure_retry_target(failed['id'],expected_version=current['version']),current)
+        self.structurer.fail=False
+        self.assertEqual(self.store.retry(job['id'],now=self.now)['status'],'queued')
+        self.process(job['id'])
+        self.assertEqual(self.store.get(job['id'])['progress']['processed'],1)
+        self.assertEqual(drafts.get(failed['id'])['status'],'pending')
         self.assertEqual(self.selector.calls,1)
 
     def test_create_consumes_material_generator_once_and_rolls_back_late_errors(self):

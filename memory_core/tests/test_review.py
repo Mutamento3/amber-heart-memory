@@ -194,9 +194,12 @@ class ReviewTests(DatabaseTestCase):
             self.store.approve(draft['id'],expected_version=draft['version']+1,expected_policy_revision=1,request_key='bad-version',embedder=self.embeddings(draft),embedding_model='fixed')
         self.config.set_core_memory('example',expected_revision=1,core_memory='New visible fact')
         with self.assertRaises(RevisionConflict): self.approve(draft)
-        edited=self.store.edit(draft['id'],draft['payload'],expected_version=draft['version'],expected_policy_revision=2)
+        current=self.store.get(draft['id'])
+        self.assertEqual(current['policy_revision'],2)
+        self.assertEqual(current['review_ready_at'],draft['review_ready_at'])
+        self.assertEqual(current['payload'],draft['payload'])
         self.store.delete_material(self.store.source(draft['id'])['id'])
-        with self.assertRaises(ValueError): self.approve(edited)
+        with self.assertRaises(ValueError): self.approve(current)
         self.assertEqual(self.counts()['memory_items'],0)
 
     def test_configuration_changes_during_embedding_do_not_commit(self):

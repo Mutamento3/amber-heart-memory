@@ -284,7 +284,10 @@ class TopicSummaryTests(DatabaseTestCase):
         self.config.set_auto_approval('one',enabled=False,expected_revision=1)
         self.assertEqual(self.store.due(NOW+timedelta(days=3),approval),[])
         self.config.set_auto_approval('one',enabled=True,expected_revision=2)
-        self.assertEqual(self.store.detail(batch['id'])['batch']['review_ready_at'],batch['review_ready_at'])
+        self.config.set_core_memory('one',expected_revision=3,core_memory='合成核心记忆')
+        current=self.store.detail(batch['id'])['batch']
+        self.assertEqual(current['review_ready_at'],batch['review_ready_at'])
+        self.assertEqual((current['policy_revision'],current['version']),(4,batch['version']+3))
         self.assertEqual(len(self.store.due(NOW+timedelta(days=3),approval)),1)
     def test_publish_stale_or_sql_failure_and_apply_failure_roll_back(self):
         batch,plan=self.ready()
@@ -298,7 +301,9 @@ class TopicSummaryTests(DatabaseTestCase):
     def test_names_changed_before_approval_refuse_old_proposal(self):
         batch,plan=self.ready()
         self.config.configure('one',Participant('新合成读者'),Participant('合成助手'),expected_revision=1)
-        with self.assertRaises(RevisionConflict):self.approve(batch|{'policy_revision':2})
+        current=self.store.detail(batch['id'])['batch']
+        self.assertEqual(current['policy_revision'],2)
+        with self.assertRaisesRegex(RevisionConflict,'参与者或主题设置已改变'):self.approve(current)
         self.assertEqual(self.embedder.calls,[])
 
     def test_empty_summary_keeps_all_sources_active_without_review(self):

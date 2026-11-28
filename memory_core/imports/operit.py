@@ -145,7 +145,7 @@ def operit_days(documents, settings):
             for prefix, event, field in events:
                 if prefix or event != "map_key":
                     continue
-                if field in ("archiveType", "formatVersion"):
+                if field == "archiveType":
                     _, _, header[field] = next(events)
                 if field not in ("chats", "memories"):
                     continue
@@ -156,8 +156,9 @@ def operit_days(documents, settings):
                 for record in _records(events, field):
                     yield from parse(record, settings)
             if "chats" in fields or header.get("archiveType") == CHAT_ARCHIVE:
-                if (fields != {"chats"} or header.get("archiveType") != CHAT_ARCHIVE
-                        or type(header.get("formatVersion")) is not int or header["formatVersion"] != 2):
-                    raise ImportFormatError("Operit 聊天记录只支持官方 JSON 导出格式版本 2")
+                # The export format version is not checked; the record
+                # structure decides what can be read.
+                if fields != {"chats"} or header.get("archiveType") != CHAT_ARCHIVE:
+                    raise ImportFormatError("Operit 聊天记录导出格式无法识别，请上传官方导出的聊天记录 JSON")
         except (ijson.JSONError, UnicodeError, OverflowError, RecursionError, StopIteration):
             raise ImportFormatError(INVALID_EXPORT) from None

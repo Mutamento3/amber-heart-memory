@@ -544,10 +544,10 @@ class WebImportTests(DatabaseTestCase):
     def test_operit_late_invalid_header_rolls_back_upload(self):
         data = operit_chat_export()
         response = self.upload('operit', json.dumps(dict(
-            chats=data['chats'], archiveType=data['archiveType'], formatVersion=3,
+            chats=data['chats'], archiveType='synthetic_other', formatVersion=2,
         )).encode(), 'chat_backup.json')
         self.assertEqual(response.status_code, 400, response.text)
-        self.assertIn('版本 2', response.json()['detail'])
+        self.assertIn('无法识别', response.json()['detail'])
         self.assertEqual(self.http.get(self.path).json()['jobs'], [])
         self.assertEqual(self.responses.calls, [])
 

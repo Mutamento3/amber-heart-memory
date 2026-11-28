@@ -122,11 +122,11 @@ class OperitImportTests(unittest.TestCase):
                          selected_conversations=[key], selected_memories=[memory_key])
         self.assertEqual((chosen["day_count"], chosen["message_count"], chosen["memory_count"]), (1, 2, 1))
 
-    def test_invalid_version_and_missing_chosen_variant_are_rejected(self):
+    def test_format_version_is_not_checked_and_missing_chosen_variant_is_rejected(self):
         data = operit_chat_export()
+        expected = parse_upload("operit", uploaded(data), SETTINGS)
         data["formatVersion"] = 3
-        with self.assertRaisesRegex(ImportFormatError, "版本 2"):
-            parse_upload("operit", uploaded(data), SETTINGS)
+        self.assertEqual(repr(parse_upload("operit", uploaded(data), SETTINGS)), repr(expected))
         data["formatVersion"] = 2
         data["chats"][0]["messages"][1]["variants"] = []
         with self.assertRaisesRegex(ImportFormatError, "选用的回复版本"):
